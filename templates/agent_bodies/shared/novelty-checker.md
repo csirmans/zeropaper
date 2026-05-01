@@ -80,6 +80,8 @@ Save to the path specified in your prompt. Build this file incrementally:
 
 ## Verdict: NOVEL / INCREMENTAL / KNOWN
 
+The verdict synthesizes evidence from both the Corbis pass (domain precision) and the OpenAlex pass (whole-corpus breadth). A miss in one but a hit in the other is still a hit. A miss in both, after a thorough search, is the only path to NOVEL.
+
 ## Closest existing papers
 [Ranked list of the most similar papers found above]
 
@@ -104,7 +106,10 @@ Save to the path specified in your prompt. Build this file incrementally:
 - **Search before concluding.** For idea-level checks (Gate 1b): at least 5 targeted searches. For full theory checks (Gate 3): at least 10 targeted searches. At least one search must be the abstract mechanism cross-subfield search (step 2 above).
 - **No hallucinated prior work.** Only cite papers you found via WebSearch. If you "remember" a paper but can't find it, say so explicitly and mark it [UNVERIFIED].
 - **Fetching papers.** Try to fetch abstracts/introductions from journal or NBER pages using WebFetch. If that fails, search for the paper title + "pdf" to find an accessible copy. SSRN pages are behind Cloudflare and cannot be fetched with WebFetch — use WebSearch instead (abstracts appear in search snippets).
-- **OpenAlex for structured queries.** You have the `openalex` skill loaded — see it for full usage. For prior-art hunting, especially `cites <seminal-paper>` (forward citations) and `search "<channel> <result>" --sort cited`, OpenAlex is faster and produces real DOIs. WebSearch remains essential for grey literature, blog posts, and very recent working papers without DOIs.
+- **Mandatory dual pass: Corbis + OpenAlex.** Novelty needs breadth, not precision. Corbis (~250K curated finance/econ papers) cannot be the sole arbiter — cross-subfield mechanism searches require OpenAlex's whole-corpus coverage. Run BOTH passes for every novelty check. Treat them as independent evidence streams; the verdict synthesizes both, neither alone decides.
+- **Corbis pass.** Read `process_log/corbis_status.json`. If `available`, use the `search` capability for direct prior-art lookup (sortBy citation count, journals filter on the top finance/econ venues). If `synthesized_review` resolves to a non-null tool (Tier 2 / Enterprise), use it for cross-subfield mechanism search; otherwise run multiple `search` calls with the abstract mechanism phrased differently each time. Resolve every tool name via `corbis_status["capabilities"]` — never hard-code. If `available` is false, skip the Corbis pass and rely on OpenAlex + WebSearch for this gate.
+- **OpenAlex pass (always runs).** Use `code/utils/openalex/openalex.py` for whole-corpus search (`search "<channel> <result>" --sort cited`), forward-citation traversal of seminal candidates (`cites <DOI>`), and out-of-domain probes. This pass is mandatory regardless of Corbis status — its breadth is what catches the cross-subfield prior art Corbis can't see.
+- **WebSearch.** Remains essential for grey literature, blog posts, and very recent working papers without DOIs.
 - **Same mechanism in different setting: depends on what the application reveals.** If applying a known mechanism to a new setting produces a surprising result — a sign reversal, an unexpected threshold, an implication that changes how practitioners think about the setting — that is NOVEL. The mechanism is borrowed but the insight is new. (Example: Berk-Green applied competitive entry to mutual funds and showed observable alpha is uninformative about skill — that was surprising and NOVEL despite the mechanism being standard IO.) If the application produces exactly the result you'd predict from the source paper with no new twist, that is INCREMENTAL.
 - **Same result via different mechanism = could be NOVEL.** A new WHY for a known WHAT can be a contribution.
 - **Be specific about what's new.** "This is novel" with no comparison to existing work is a failure of the check.
