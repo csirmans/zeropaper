@@ -39,9 +39,18 @@ CAPABILITY_TO_TOOL = {
 
 
 def read_env_key(env_file: Path) -> Optional[str]:
-    """Return CORBIS_API_KEY from a .env file, or None if missing/empty."""
+    """Return CORBIS_API_KEY from a .env file, preferring the last non-empty
+    occurrence. This matches typical shell .env-sourcing semantics where
+    later assignments override earlier ones, and it handles the common case
+    where setup writes an empty `CORBIS_API_KEY=` line and the user later
+    appends `CORBIS_API_KEY=<real_key>` instead of editing in place.
+
+    Returns None if the file is missing, the variable is absent, or all
+    occurrences are empty.
+    """
     if not env_file.exists():
         return None
+    last_value: Optional[str] = None
     for raw in env_file.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -49,10 +58,12 @@ def read_env_key(env_file: Path) -> Optional[str]:
         if "=" not in line:
             continue
         key, _, value = line.partition("=")
-        if key.strip() == "CORBIS_API_KEY":
-            value = value.strip().strip('"').strip("'")
-            return value or None
-    return None
+        if key.strip() != "CORBIS_API_KEY":
+            continue
+        value = value.strip().strip('"').strip("'")
+        if value:
+            last_value = value
+    return last_value
 
 
 def default_http_post(url: str, headers: dict, body: bytes) -> bytes:

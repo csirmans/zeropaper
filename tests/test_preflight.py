@@ -198,3 +198,32 @@ def test_writes_unavailable_on_jsonrpc_error_response(tmp_path, preflight):
     assert status["available"] is False
     # The reason should surface the upstream error so the user can debug
     assert "unauthorized" in status["reason"].lower() or "error" in status["reason"].lower()
+
+
+def test_read_env_key_prefers_last_non_empty_when_duplicates(tmp_path, preflight):
+    """If .env contains the empty CORBIS_API_KEY= line setup wrote plus a
+    later non-empty CORBIS_API_KEY=value the user appended, return the
+    user's value (matches shell .env-sourcing semantics)."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CORBIS_API_KEY=\n"
+        "OTHER=foo\n"
+        "CORBIS_API_KEY=corbis_mcp_real_key\n"
+    )
+    assert preflight.read_env_key(env_file) == "corbis_mcp_real_key"
+
+
+def test_read_env_key_returns_none_when_all_duplicates_empty(tmp_path, preflight):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CORBIS_API_KEY=\n"
+        "CORBIS_API_KEY=\n"
+    )
+    assert preflight.read_env_key(env_file) is None
+
+
+def test_read_env_key_handles_single_non_empty_unchanged(tmp_path, preflight):
+    """Regression: existing single-value behavior must not change."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("CORBIS_API_KEY=just_one\n")
+    assert preflight.read_env_key(env_file) == "just_one"
