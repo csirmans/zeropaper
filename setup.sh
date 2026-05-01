@@ -755,6 +755,7 @@ if [ "$MANUAL" = "1" ]; then
 else
     SKILL_MODE="autonomous"
 fi
+export SKILL_MODE
 
 # SymPy skill (available for all variants — preloaded into math-touching subagents)
 assemble_claude_skills \
