@@ -235,3 +235,84 @@ def test_claude_flat_skill_does_not_parse_body_frontmatter(tmp_path, make_metada
     # Body's literal --- block is preserved as content; no merging happens.
     assert text.count("---") >= 4  # one frontmatter pair + literal pair in body
     assert "name: flat" in text
+
+
+def test_codex_mode_autonomous_skips_manual_only(tmp_path, make_metadata, make_body, codex_assembler):
+    bodies = tmp_path / "bodies"
+    make_body("bodies/keep.md", "kept")
+    make_body("bodies/skip.md", "skipped")
+    metadata = make_metadata("meta.json", {
+        "keep": {"name": "keep", "description": "always"},
+        "skip": {"name": "skip", "description": "manual", "manual_only": True},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    codex_assembler(metadata, bodies, out, mode="autonomous")
+    assert (out / "keep" / "SKILL.md").exists()
+    assert not (out / "skip" / "SKILL.md").exists()
+
+
+def test_codex_mode_manual_skips_pipeline_only(tmp_path, make_metadata, make_body, codex_assembler):
+    bodies = tmp_path / "bodies"
+    make_body("bodies/keep.md", "kept")
+    make_body("bodies/skip.md", "skipped")
+    metadata = make_metadata("meta.json", {
+        "keep": {"name": "keep", "description": "always"},
+        "skip": {"name": "skip", "description": "pipeline", "pipeline_only": True},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    codex_assembler(metadata, bodies, out, mode="manual")
+    assert (out / "keep" / "SKILL.md").exists()
+    assert not (out / "skip" / "SKILL.md").exists()
+
+
+def test_codex_internal_keys_do_not_leak_to_frontmatter(tmp_path, make_metadata, make_body, codex_assembler):
+    make_body("bodies/foo.md", "body")
+    metadata = make_metadata("meta.json", {
+        "foo": {
+            "name": "foo", "description": "test",
+            "pipeline_only": True, "body_path": "foo.md", "assets_dir": None,
+            "claude": {"user-invocable": False}, "codex": {"model": "gpt-5.5"},
+            "gemini": {"model": "gemini-3-flash-preview"},
+        },
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    codex_assembler(metadata, tmp_path / "bodies", out)
+    text = (out / "foo" / "SKILL.md").read_text()
+    for forbidden in ("pipeline_only:", "manual_only:", "body_path:", "assets_dir:",
+                      "claude:", "gemini:", "user-invocable:", "allowed-tools:"):
+        assert forbidden not in text, f"codex frontmatter must not include {forbidden}"
+    assert "name: foo" in text
+    assert "description: test" in text
+
+
+def test_codex_directory_shaped_skill_with_assets(tmp_path, make_metadata, make_body, codex_assembler):
+    make_body("bodies/dir/SKILL.md", "# Dir\n\nbody\n")
+    make_body("bodies/dir/assets/x.md", "asset\n")
+    metadata = make_metadata("meta.json", {
+        "dir": {"name": "dir", "description": "x",
+                "body_path": "dir/SKILL.md", "assets_dir": "dir"},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    codex_assembler(metadata, tmp_path / "bodies", out)
+    assert (out / "dir" / "SKILL.md").exists()
+    assert (out / "dir" / "assets" / "x.md").exists()
+
+
+def test_codex_dir_skill_merges_body_frontmatter(tmp_path, make_metadata, make_body, codex_assembler):
+    body_text = "---\nname: from_body\ndescription: body desc\n---\n\nbody\n"
+    make_body("bodies/dir/SKILL.md", body_text)
+    metadata = make_metadata("meta.json", {
+        "dir": {"name": "metadata_wins", "description": "meta desc",
+                "body_path": "dir/SKILL.md", "assets_dir": "dir"},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    codex_assembler(metadata, tmp_path / "bodies", out)
+    text = (out / "dir" / "SKILL.md").read_text()
+    assert "name: metadata_wins" in text
+    assert "name: from_body" not in text
+    assert "description: meta desc" in text
