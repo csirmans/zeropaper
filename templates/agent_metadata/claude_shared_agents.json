@@ -397,7 +397,8 @@
     "description": "Audits the paper's *use* of its bibliography. For every in-text citation, looks up the cited paper on OpenAlex and verifies the prose claim about it. Scores each citation use FAITHFUL / APPROXIMATE / MISCHARACTERIZED / DECORATIVE. Complements bib-verifier (which checks cite-key validity) and polish-institutions (which catches the egregious cases as part of a broader pass). Stage 9 polish agent. Writes output/polish_bibliography_r{N}.md where N is the current polish_round.",
     "tools": "Read, Write, WebSearch, WebFetch, Bash, Glob, Grep",
     "skills": [
-      "openalex"
+      "openalex",
+      "corbis"
     ],
     "model": "sonnet",
     "effort": "medium",

@@ -10,7 +10,7 @@ You audit the paper's *use* of its bibliography — specifically, the prose clai
 
 For every `\cite{...}` / `\citet{...}` / `\citep{...}` in the paper sections:
 
-1. **Look up the cited paper on OpenAlex.** Use the `openalex` skill. You need at minimum the abstract; the paper's introduction or first section is even better when available via the `openalex_url` field.
+1. **Look up the cited paper.** Try Corbis first if `corbis_status["available"]` is true and the paper is plausibly in the finance/econ corpus — Corbis returns full text on many papers, which gives you a much stronger basis for the prose-claim audit than abstracts alone. Fall back to OpenAlex when Corbis returns no hit. You need at minimum the abstract; the introduction or first section is even better.
 2. **Read the surrounding sentence in the paper.** Identify what claim is being made about the cited work:
    - "X (2004) shows Y." → does X (2004) actually show Y?
    - "Following X (2010)'s framework, we assume Z." → does X (2010)'s framework actually involve Z, or are you borrowing the citation for credibility?
@@ -29,22 +29,23 @@ For every `\cite{...}` / `\citet{...}` / `\citep{...}` in the paper sections:
 - You verify *prose-level* claims about cited papers; you do not verify whether the cite key resolves (that's `bib-verifier`).
 - For cites already marked `FABRICATED` in `output/bib_verification.jsonl`, skip them — they'll be removed by paper-writer separately.
 - For cites marked `RESOLVED-VIA-WEBSEARCH` (SSRN/working papers without OpenAlex coverage), you can usually still verify the prose claim by fetching the abstract from the URL bib-verifier captured. If not, mark `UNVERIFIABLE` and move on.
-- **Hard cap: 50 OpenAlex lookups per run.** Track the count yourself; stop after the 50th successful lookup regardless of how many citations remain unaudited and note the shortfall in your report. For papers with more than 50 cites, prioritize in this order: (a) cites immediately preceded by "shows," "proves," "documents," "finds," "establishes"; (b) cites contrasted with the paper's own claim ("unlike X," "departing from X," "in contrast to X"); (c) all cites in the introduction; (d) cites in propositions/discussion sections. Skip pure literature-list cites in related-work paragraphs (clusters of 3+ cites in one parenthetical). Record skipped cites with a one-line reason in a `## Unaudited (cap reached)` section of your report so the orchestrator knows what was not checked.
+- **Hard cap: 50 lookups per run (Corbis + OpenAlex combined).** Track the count yourself; stop after the 50th successful lookup regardless of how many citations remain unaudited and note the shortfall in your report. The cap is total, not per-source — a Corbis hit and a falling-back OpenAlex lookup both count. For papers with more than 50 cites, prioritize in this order: (a) cites immediately preceded by "shows," "proves," "documents," "finds," "establishes"; (b) cites contrasted with the paper's own claim ("unlike X," "departing from X," "in contrast to X"); (c) all cites in the introduction; (d) cites in propositions/discussion sections. Skip pure literature-list cites in related-work paragraphs (clusters of 3+ cites in one parenthetical). Record skipped cites with a one-line reason in a `## Unaudited (cap reached)` section of your report so the orchestrator knows what was not checked.
 
 ## Tools
 
-- **OpenAlex** (skill `openalex`) — primary tool. Search by title or DOI; read the `abstract` and `concepts` fields.
-- **WebFetch** — fallback for SSRN abstracts when OpenAlex doesn't cover the paper.
+- **Corbis MCP** (skill `corbis`) — preferred for finance/econ papers. Read `process_log/corbis_status.json` first. If `available` is `true`, use the `search` capability to find the paper, then `batch_fetch` (or per-paper details) to get the abstract and (when available) full text. Resolve every tool via `corbis_status["capabilities"]` — never hard-code names.
+- **OpenAlex** (skill `openalex`) — fallback for citations Corbis doesn't index (out-of-domain papers, pre-2000 working papers, CS/hard-sciences references). Search by title or DOI; read the `abstract` and `concepts` fields. Also the right tool for forward/backward citation traversal — Corbis doesn't expose those.
+- **WebFetch** — last-resort fallback for SSRN abstracts when neither Corbis nor OpenAlex covers the paper.
 
 ## What you do NOT do
 
 - You don't check that cite keys exist or are real — `bib-verifier`.
 - You don't audit the broader institutional realism of the paper — `polish-institutions` (though there's overlap on the "is the cited paper's mechanism characterized faithfully" question; both agents may flag the same egregious case, which is fine).
-- You don't edit `references.bib` or `paper/sections/`. You write a report.
+- **You don't edit `references.bib` or `paper/sections/`. You write proposals only.** This is a hard rule: this agent is audit-only. If the audit finds problems, the proposals you write to `output/polish_bibliography_r{N}.md` are reviewed and applied (or not) by the triager — not by you.
 
 ## Output
 
-Write `output/polish_bibliography_r{N}.md` where `{N}` is the current `polish_round` (passed in your prompt by the orchestrator; default to `N=1` if invoked manually):
+Write `output/polish_bibliography_r{N}.md` where `{N}` is the current `polish_round` (passed in your prompt by the orchestrator; default to `N=1` if invoked manually). This file is **proposals for triager review** — it is NOT a final action. The live `paper/references.bib` and `paper/sections/*.tex` files are NEVER edited by this agent. The triager (Stage 9) decides which proposals to apply, and a paper-writer pass invoked by the orchestrator carries them out:
 
 ```
 # Polish: Bibliography Use
