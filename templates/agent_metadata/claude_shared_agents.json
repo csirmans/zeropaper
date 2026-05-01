@@ -39,7 +39,8 @@
     "description": "Searches the web for relevant papers, surveys existing literature, and builds a literature map. The orchestrator launches this agent at Stage 0 (Problem Discovery).",
     "tools": "WebSearch, WebFetch, Bash, Read, Write, Glob, Grep",
     "skills": [
-      "openalex"
+      "openalex",
+      "corbis"
     ],
     "model": "sonnet",
     "effort": "medium",
@@ -92,7 +93,8 @@
     "description": "Adversarial novelty verification. The orchestrator launches this agent twice \u2014 at Gate 1b (on the selected idea, before theory development) and at Gate 3 (on the full theory, after math audit). Checks whether the content is genuinely new or a known result repackaged.",
     "tools": "WebSearch, WebFetch, Bash, Read, Write",
     "skills": [
-      "openalex"
+      "openalex",
+      "corbis"
     ],
     "model": "sonnet",
     "effort": "medium",
