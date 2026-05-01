@@ -44,7 +44,7 @@ Write your results to the file path specified in your prompt. Build incrementall
 ## Rules
 
 - **Write incrementally.** Append findings after each search round. Never accumulate everything in memory for a final write.
-- **No hallucinated references.** Every paper you cite must come from a WebSearch result. If you can't find it, don't cite it.
+- **No hallucinated references.** Every paper you cite must come from a real lookup result — Corbis MCP, OpenAlex CLI, WebSearch, or WebFetch. If a paper's title/authors/year/DOI is not backed by one of those sources, don't cite it. If you can't verify a paper from any source, mark it `[UNVERIFIED]`.
 - **Verify before citing.** If you remember a paper but can't find it via search, mark it as `[UNVERIFIED]`.
 - **Be specific.** "Smith (2020) shows X" not "the literature shows X."
 - **Focus on top outlets.** See the "Variant context" section at the bottom of this file for target journals. Include working papers from NBER/SSRN if highly relevant.
