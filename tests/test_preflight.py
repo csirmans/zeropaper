@@ -171,3 +171,30 @@ def test_creates_output_directory_if_missing(tmp_path, preflight):
 
     assert rc == 0
     assert nested.exists()
+
+
+def test_writes_unavailable_on_jsonrpc_error_response(tmp_path, preflight):
+    """Corbis can return HTTP 200 with a JSON-RPC error envelope (auth fail,
+    method not found, missing initialize handshake, etc.). The preflight
+    must treat this as unavailable, not silently emit available:true with
+    an empty tool list."""
+    env_file = tmp_path / ".env"
+    env_file.write_text('CORBIS_API_KEY=corbis_mcp_test\n')
+    out_file = tmp_path / "corbis_status.json"
+
+    fake_response = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {"code": -32602, "message": "unauthorized"},
+    }).encode("utf-8")
+
+    rc = preflight.run(
+        env_file=env_file, output_file=out_file,
+        _http_post=lambda url, headers, body: fake_response,
+    )
+
+    assert rc == 0
+    status = json.loads(out_file.read_text())
+    assert status["available"] is False
+    # The reason should surface the upstream error so the user can debug
+    assert "unauthorized" in status["reason"].lower() or "error" in status["reason"].lower()

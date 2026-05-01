@@ -63,12 +63,23 @@ def default_http_post(url: str, headers: dict, body: bytes) -> bytes:
 
 
 def list_tools(api_key: str, _http_post: Callable[[str, dict, bytes], bytes]) -> list[str]:
-    """Call MCP tools/list against the Corbis HTTP endpoint. Returns tool names."""
+    """Call MCP tools/list against the Corbis HTTP endpoint. Returns tool names.
+
+    Raises ValueError when Corbis returns a JSON-RPC error envelope (auth fail,
+    method not found, etc.) — the caller maps this to available:false.
+    """
     url = CORBIS_MCP_URL_TEMPLATE.format(key=api_key)
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode("utf-8")
     raw = _http_post(url, headers, body)
     payload = json.loads(raw.decode("utf-8"))
+    # JSON-RPC error envelope — treat as unavailable.
+    if "error" in payload and payload["error"]:
+        err = payload["error"]
+        if isinstance(err, dict):
+            msg = err.get("message") or err.get("code") or "unknown error"
+            raise ValueError(f"jsonrpc error: {msg}")
+        raise ValueError(f"jsonrpc error: {err}")
     result = payload.get("result") or {}
     tools = result.get("tools") or []
     names: list[str] = []
@@ -122,9 +133,11 @@ def run(
         })
         return 0
     except (json.JSONDecodeError, ValueError, KeyError) as exc:
+        # Includes JSON-RPC error envelopes (caught as ValueError from list_tools)
+        # and any malformed/unexpected response shape.
         write_status(output_file, {
             "available": False,
-            "reason": f"malformed response: {exc}",
+            "reason": f"upstream error: {exc}",
             "checked_at": timestamp,
         })
         return 0
