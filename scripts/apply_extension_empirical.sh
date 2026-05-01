@@ -14,12 +14,18 @@ if [ -n "$9" ]; then
     MODEL_OVERRIDE_ARG=(--model-override "$9")
 fi
 
+# SKILL_MODE is inherited from the calling setup.sh environment. Defensive
+# fallback to autonomous when this script is invoked directly (e.g., during
+# extension testing) or when the parent has not exported the var.
+SKILL_MODE="${SKILL_MODE:-autonomous}"
+
 EXT_ROOT="$TEMPLATE_ROOT/extensions/empirical"
 
 python3 "$TEMPLATE_ROOT/scripts/assemble_claude_skills.py" \
     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/empirical_skills.json" \
     --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/empirical" \
-    --output-dir "$SKILLS_OUT"
+    --output-dir "$SKILLS_OUT" \
+    --mode "$SKILL_MODE"
 
 if [ -f "$EXT_ROOT/agent_metadata/shared_agents.json" ]; then
     python3 "$TEMPLATE_ROOT/scripts/assemble_claude_agents.py" \
