@@ -241,11 +241,13 @@ assemble_claude_skills() {
     local metadata_file="$2"
     local bodies_dir="$3"
     local dest_dir="$4"
+    local mode="$5"  # "autonomous" or "manual"
 
     python3 "$template_root/scripts/assemble_claude_skills.py" \
         --metadata "$metadata_file" \
         --bodies-dir "$bodies_dir" \
-        --output-dir "$dest_dir"
+        --output-dir "$dest_dir" \
+        --mode "$mode"
 }
 
 if [ "$LOCAL" = "1" ]; then
@@ -472,7 +474,7 @@ python3 "$TEMPLATE_ROOT/scripts/assemble_runtime_doc.py" \
     --domain-areas "$DOMAIN_AREAS" \
     --doc-name "GEMINI.md" \
     --agent-dir "$GEMINI_AGENTS_REL" \
-    --skill-dir "$GEMINI_DIR_REL/skills" \
+    --skill-dir "$CODEX_SKILLS_REL" \
     "${GEMINI_DISCIPLINE_ARGS[@]}" \
     "${SEED_ARGS[@]}" \
     "${CATALOG_ARGS[@]}" \
@@ -737,29 +739,39 @@ else
     CODEX_SKILLS_OUT="$CODEX_SKILLS_REL"
 fi
 
+if [ "$MANUAL" = "1" ]; then
+    SKILL_MODE="manual"
+else
+    SKILL_MODE="autonomous"
+fi
+
 # SymPy skill (available for all variants — preloaded into math-touching subagents)
 assemble_claude_skills \
     "$TEMPLATE_ROOT" \
     "$TEMPLATE_ROOT/templates/skill_metadata/sympy_skills.json" \
     "$TEMPLATE_ROOT/templates/skill_bodies/sympy" \
-    "$SKILLS_OUT"
+    "$SKILLS_OUT" \
+    "$SKILL_MODE"
 
 python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/sympy_skills.json" \
     --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/sympy" \
-    --output-dir "$CODEX_SKILLS_OUT"
+    --output-dir "$CODEX_SKILLS_OUT" \
+    --mode "$SKILL_MODE"
 
 # Codex math skill (available for all variants)
 assemble_claude_skills \
     "$TEMPLATE_ROOT" \
     "$TEMPLATE_ROOT/templates/skill_metadata/codex_math_skills.json" \
     "$TEMPLATE_ROOT/templates/skill_bodies/codex_math" \
-    "$SKILLS_OUT"
+    "$SKILLS_OUT" \
+    "$SKILL_MODE"
 
 python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/codex_math_skills.json" \
     --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/codex_math" \
-    --output-dir "$CODEX_SKILLS_OUT"
+    --output-dir "$CODEX_SKILLS_OUT" \
+    --mode "$SKILL_MODE"
 
 # Copy codex-math utility scripts
 mkdir -p "$P/code/utils/codex_math"
@@ -780,12 +792,14 @@ assemble_claude_skills \
     "$TEMPLATE_ROOT" \
     "$TEMPLATE_ROOT/templates/skill_metadata/bib_verify_skills.json" \
     "$TEMPLATE_ROOT/templates/skill_bodies/bib_verify" \
-    "$SKILLS_OUT"
+    "$SKILLS_OUT" \
+    "$SKILL_MODE"
 
 python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/bib_verify_skills.json" \
     --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/bib_verify" \
-    --output-dir "$CODEX_SKILLS_OUT"
+    --output-dir "$CODEX_SKILLS_OUT" \
+    --mode "$SKILL_MODE"
 
 # Copy bib-verify utility scripts
 mkdir -p "$P/code/utils/bib_verify"
@@ -798,12 +812,14 @@ assemble_claude_skills \
     "$TEMPLATE_ROOT" \
     "$TEMPLATE_ROOT/templates/skill_metadata/openalex_skills.json" \
     "$TEMPLATE_ROOT/templates/skill_bodies/openalex" \
-    "$SKILLS_OUT"
+    "$SKILLS_OUT" \
+    "$SKILL_MODE"
 
 python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/openalex_skills.json" \
     --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/openalex" \
-    --output-dir "$CODEX_SKILLS_OUT"
+    --output-dir "$CODEX_SKILLS_OUT" \
+    --mode "$SKILL_MODE"
 
 # Copy OpenAlex utility script
 mkdir -p "$P/code/utils/openalex"
@@ -840,7 +856,8 @@ for ext in "${EXTENSIONS[@]}"; do
             python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
                 --metadata "$TEMPLATE_ROOT/templates/skill_metadata/theory_llm_skills.json" \
                 --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/theory_llm" \
-                --output-dir "$CODEX_SKILLS_OUT"
+                --output-dir "$CODEX_SKILLS_OUT" \
+                --mode "$SKILL_MODE"
 
             # Inject stage instructions into runtime docs at {{EXTENSION_STAGES}} placeholder
             INJECT="$TEMPLATE_ROOT/extensions/theory_llm/stages_inject.md"
@@ -938,7 +955,8 @@ PYEOF
             python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
                 --metadata "$TEMPLATE_ROOT/templates/skill_metadata/empirical_skills.json" \
                 --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/empirical" \
-                --output-dir "$CODEX_SKILLS_OUT"
+                --output-dir "$CODEX_SKILLS_OUT" \
+                --mode "$SKILL_MODE"
 
             # Inject stage instructions into runtime docs at {{EXTENSION_STAGES}} placeholder
             INJECT="$TEMPLATE_ROOT/extensions/empirical/stages_inject.md"
