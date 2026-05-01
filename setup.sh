@@ -523,18 +523,29 @@ for agent in literature-scout gap-scout novelty-checker theory-explorer referee 
         echo "$VARIANT_BLOCK" >> "$AGENTS_OUT/$agent.md"
     fi
     if [ -f "$CODEX_AGENTS_OUT/$agent.toml" ]; then
-        # Insert before the closing ''' in the TOML multiline string
-        # Use awk to find the LAST ''' and insert the block before it
-        awk -v block="$VARIANT_BLOCK" '
-        { lines[NR] = $0 }
-        /^'\'''\'''\''$/ { last = NR }
-        END {
-            for (i = 1; i <= NR; i++) {
-                if (i == last) print block
-                print lines[i]
-            }
-        }' "$CODEX_AGENTS_OUT/$agent.toml" > "$CODEX_AGENTS_OUT/$agent.toml.tmp" \
-        && mv "$CODEX_AGENTS_OUT/$agent.toml.tmp" "$CODEX_AGENTS_OUT/$agent.toml"
+        # Insert variant block before the closing ''' of the
+        # developer_instructions multiline TOML string. awk -v cannot accept
+        # embedded newlines in its assignment, so hand the block to python via
+        # a temp file (robust against any future block content).
+        VARIANT_BLOCK_FILE=$(mktemp)
+        printf '%s' "$VARIANT_BLOCK" > "$VARIANT_BLOCK_FILE"
+        python3 - "$CODEX_AGENTS_OUT/$agent.toml" "$VARIANT_BLOCK_FILE" <<'PYEOF'
+import sys
+path, block_path = sys.argv[1], sys.argv[2]
+block = open(block_path).read()
+text = open(path).read()
+lines = text.splitlines(keepends=True)
+last_idx = None
+for i, line in enumerate(lines):
+    if line.strip() == "'''":
+        last_idx = i
+if last_idx is not None:
+    if not block.endswith("\n"):
+        block += "\n"
+    lines.insert(last_idx, block)
+    open(path, "w").write("".join(lines))
+PYEOF
+        rm -f "$VARIANT_BLOCK_FILE"
     fi
     if [ -f "$GEMINI_AGENTS_OUT/$agent.md" ]; then
         echo "$VARIANT_BLOCK" >> "$GEMINI_AGENTS_OUT/$agent.md"
