@@ -1,11 +1,15 @@
 ## How to start a session
 
-1. Read `process_log/pipeline_state.json`
+1. Run the Corbis MCP preflight: `python3 code/utils/corbis/preflight.py`
+   - This writes `process_log/corbis_status.json` with `available: true|false` and a capability map.
+   - Exits 0 even when Corbis is unreachable or the key is missing — never blocks the pipeline.
+   - Runs on every launch and resume so a freshly-rotated key or a now-available Corbis is picked up immediately.
+2. Read `process_log/pipeline_state.json`
    - If `status` is `"not_started"` and `"seeded"` is `true`: run data inventory (below), set to `"running"`, then follow the **Seeded idea mode** entry sequence (see above)
    - If `status` is `"not_started"`: run data inventory (below), set to `"running"`, begin Stage 0
    - If `status` is `"running"`: read `current_stage` and continue from there
    - If `status` is `"complete"`: report that the pipeline is done
-2. No human confirmation needed — just run
+3. No human confirmation needed — just run
 
 ### Data inventory (runs once at pipeline start)
 
