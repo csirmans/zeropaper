@@ -129,3 +129,56 @@ def test_claude_internal_keys_do_not_leak_to_frontmatter(tmp_path, make_metadata
     assert "description: test" in text
     assert "user-invocable: false" in text
     assert "allowed-tools: Read" in text
+
+
+def test_claude_directory_shaped_skill_outputs_skill_md_dir(tmp_path, make_metadata, make_body, claude_assembler):
+    # Skill body lives at bodies/dirskill/SKILL.md, with an asset file.
+    bodies_root = tmp_path / "bodies"
+    make_body("bodies/dirskill/SKILL.md", "# Dir Skill\n\nbody content\n")
+    make_body("bodies/dirskill/assets/template.md", "asset content\n")
+
+    metadata = make_metadata("meta.json", {
+        "dirskill": {
+            "name": "dirskill",
+            "description": "dir-shaped",
+            "body_path": "dirskill/SKILL.md",
+            "assets_dir": "dirskill",
+            "claude": {"user-invocable": True, "allowed-tools": "Read"},
+        },
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, bodies_root, out)
+
+    # Directory-shaped output: out/dirskill/SKILL.md (+ assets dir copied)
+    skill_md = out / "dirskill" / "SKILL.md"
+    asset = out / "dirskill" / "assets" / "template.md"
+    assert skill_md.exists(), "directory-shaped skill should write SKILL.md inside its dir"
+    assert asset.exists(), "assets must be copied"
+    assert "name: dirskill" in skill_md.read_text()
+    assert "body content" in skill_md.read_text()
+    assert asset.read_text() == "asset content\n"
+
+
+def test_claude_flat_and_directory_skills_coexist(tmp_path, make_metadata, make_body, claude_assembler):
+    bodies_root = tmp_path / "bodies"
+    make_body("bodies/flat.md", "flat body")
+    make_body("bodies/dir/SKILL.md", "dir body")
+
+    metadata = make_metadata("meta.json", {
+        "flat": {"name": "flat", "description": "x", "claude": {"user-invocable": False, "allowed-tools": "Read"}},
+        "dir": {
+            "name": "dir", "description": "y",
+            "body_path": "dir/SKILL.md", "assets_dir": "dir",
+            "claude": {"user-invocable": True, "allowed-tools": "Read"},
+        },
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, bodies_root, out)
+
+    # Both flat-source and dir-source skills produce the same OUTPUT shape:
+    # output_dir/{skill_id}/SKILL.md. The difference is only in how the
+    # source body and assets are resolved.
+    assert (out / "flat" / "SKILL.md").exists()
+    assert (out / "dir" / "SKILL.md").exists()

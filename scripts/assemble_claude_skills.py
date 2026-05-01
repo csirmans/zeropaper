@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 # Frontmatter keys allowed in assembled SKILL.md output. Order is the emit order.
@@ -76,11 +77,30 @@ def main():
     for skill_id, skill_metadata in metadata.items():
         if not skill_passes_mode_filter(skill_metadata, args.mode):
             continue
-        body_path = bodies_dir / f"{skill_id}.md"
+
+        body_rel = skill_metadata.get("body_path", f"{skill_id}.md")
+        body_path = bodies_dir / body_rel
         body = body_path.read_text()
-        skill_dir = output_dir / skill_id
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        (skill_dir / "SKILL.md").write_text(render_skill(normalize_metadata(skill_metadata), body))
+
+        assets_rel = skill_metadata.get("assets_dir")
+        is_directory_shape = assets_rel is not None
+
+        normalized = normalize_metadata(skill_metadata)
+        rendered = render_skill(normalized, body)
+
+        if is_directory_shape:
+            skill_out = output_dir / skill_id
+            if skill_out.exists():
+                shutil.rmtree(skill_out)
+            shutil.copytree(bodies_dir / assets_rel, skill_out)
+            # Overwrite the source SKILL.md with the assembled rendering.
+            (skill_out / "SKILL.md").write_text(rendered)
+        else:
+            # Flat-source skills still emit at output_dir/{skill_id}/SKILL.md
+            # to match the existing convention for both Claude and Codex.
+            skill_out = output_dir / skill_id
+            skill_out.mkdir(parents=True, exist_ok=True)
+            (skill_out / "SKILL.md").write_text(rendered)
 
 
 if __name__ == "__main__":
