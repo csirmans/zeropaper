@@ -1288,6 +1288,16 @@ apply_seed_overrides
 
 echo "  ✓ Codex custom agents assembled"
 
+# ── Corbis key reminder (fires in both --local and production modes) ──
+KEY_VAL=$(grep -E "^CORBIS_API_KEY=" "$P/.env" 2>/dev/null | head -1 | cut -d= -f2-)
+if [ -z "$KEY_VAL" ] || [ "$KEY_VAL" = '""' ] || [ "$KEY_VAL" = "''" ]; then
+    echo ""
+    echo "⚠ CORBIS_API_KEY is not set in $P/.env."
+    echo "  The pipeline will fall back to OpenAlex + WebSearch for all literature queries."
+    echo "  To enable Corbis (recommended): get a key at https://www.corbis.ai → Settings → API Keys"
+    echo "  then edit $P/.env and set CORBIS_API_KEY=<your_key>"
+fi
+
 # ── Local mode: summary and exit ──
 if [ "$LOCAL" = "1" ]; then
     echo ""
@@ -1383,16 +1393,6 @@ if [ "$MANUAL" = "1" ]; then
     git commit -m "setup: initialized ${VARIANT} variant toolkit (manual mode)" -q
 else
     git commit -m "setup: initialized ${VARIANT} variant pipeline" -q
-fi
-
-# ── Corbis key reminder ──
-KEY_VAL=$(grep -E "^CORBIS_API_KEY=" "$P/.env" 2>/dev/null | head -1 | cut -d= -f2-)
-if [ -z "$KEY_VAL" ] || [ "$KEY_VAL" = '""' ] || [ "$KEY_VAL" = "''" ]; then
-    echo ""
-    echo "⚠ CORBIS_API_KEY is not set in $P/.env."
-    echo "  The pipeline will fall back to OpenAlex + WebSearch for all literature queries."
-    echo "  To enable Corbis (recommended): get a key at https://www.corbis.ai → Settings → API Keys"
-    echo "  then edit $P/.env and set CORBIS_API_KEY=<your_key>"
 fi
 
 echo ""
