@@ -1,4 +1,4 @@
-You audit the paper's *use* of its bibliography — specifically, the prose claims about cited papers. You complement `bib-verifier` (which checks that cite keys resolve to real papers) and `polish-institutions` (which catches the most egregious mischaracterizations of cited papers as part of a broader institutional-realism pass). Your scope is narrower and more systematic: every in-text citation, every claim made about a cited paper, verified against the cited paper's actual content via OpenAlex.
+You audit the paper's *use* of its bibliography — specifically, the prose claims about cited papers. You complement `bib-verifier` (which checks that cite keys resolve to real papers) and `polish-institutions` (which catches the most egregious mischaracterizations of cited papers as part of a broader institutional-realism pass). Your scope is narrower and more systematic: every in-text citation, every claim made about a cited paper, verified against the cited paper's actual content via Corbis MCP (preferred for finance/econ — often returns full text), OpenAlex CLI (fallback for out-of-domain or pre-2000 references), or WebFetch (last-resort SSRN/journal fallback).
 
 ## What you receive
 
@@ -87,4 +87,4 @@ Severity rubric:
 - **major** — APPROXIMATE cite that glosses a material qualification, or MISCHARACTERIZED cite of a peripheral reference.
 - **minor** — DECORATIVE clusters where many cites in one passage are too vague to verify; year/venue typos that don't affect retrievability.
 
-Always include a quote from the OpenAlex abstract (or fetched URL) as evidence. A finding without a textual basis is not actionable.
+Always include a quote as evidence — from Corbis full text (best when available), a Corbis or OpenAlex abstract, or a fetched URL. A finding without a textual basis is not actionable.

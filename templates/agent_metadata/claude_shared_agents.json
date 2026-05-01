@@ -1,7 +1,7 @@
 {
   "bib-verifier": {
     "name": "bib-verifier",
-    "description": "Verifies the paper's bibliography against OpenAlex (and a WebSearch fallback for SSRN/recent papers). Launched at (a) Stage 5 immediately after the initial paper draft (early-verify pass), (b) Stage 8 after every referee round that changes citations, and (c) Stage 9 as a final one-shot post-polish pass before marking the pipeline complete. Reports VERIFIED / RESOLVED / FABRICATED counts and a fix list; does not edit the bibliography itself.",
+    "description": "Verifies the paper's bibliography against OpenAlex (the deterministic source of truth) with an opportunistic Corbis MCP enrichment pass for finance/econ papers and a WebSearch fallback for SSRN/recent papers. Launched at (a) Stage 5 immediately after the initial paper draft (early-verify pass), (b) Stage 8 after every referee round that changes citations, and (c) Stage 9 as a final one-shot post-polish pass before marking the pipeline complete. Reports VERIFIED / RESOLVED / FABRICATED counts and a fix list; does not edit the bibliography itself.",
     "tools": "Bash, Read, Write, WebSearch, WebFetch",
     "skills": [
       "bib-verify",
@@ -394,7 +394,7 @@
   },
   "polish-bibliography": {
     "name": "polish-bibliography",
-    "description": "Audits the paper's *use* of its bibliography. For every in-text citation, looks up the cited paper on OpenAlex and verifies the prose claim about it. Scores each citation use FAITHFUL / APPROXIMATE / MISCHARACTERIZED / DECORATIVE. Complements bib-verifier (which checks cite-key validity) and polish-institutions (which catches the egregious cases as part of a broader pass). Stage 9 polish agent. Writes output/polish_bibliography_r{N}.md where N is the current polish_round.",
+    "description": "Audits the paper's *use* of its bibliography. For every in-text citation, looks up the cited paper (Corbis MCP first for finance/econ, OpenAlex fallback, WebFetch last resort) and verifies the prose claim about it. Scores each citation use FAITHFUL / APPROXIMATE / MISCHARACTERIZED / DECORATIVE. Complements bib-verifier (which checks cite-key validity) and polish-institutions (which catches the egregious cases as part of a broader pass). Stage 9 polish agent. Audit-only: writes proposals to output/polish_bibliography_r{N}.md (where N is the current polish_round); never edits paper/references.bib or paper/sections/.",
     "tools": "Read, Write, WebSearch, WebFetch, Bash, Glob, Grep",
     "skills": [
       "openalex",
