@@ -182,3 +182,56 @@ def test_claude_flat_and_directory_skills_coexist(tmp_path, make_metadata, make_
     # source body and assets are resolved.
     assert (out / "flat" / "SKILL.md").exists()
     assert (out / "dir" / "SKILL.md").exists()
+
+
+def test_claude_dir_skill_merges_body_frontmatter(tmp_path, make_metadata, make_body, claude_assembler):
+    # The body file already has frontmatter (e.g., from a CorbisStarter source)
+    body_text = (
+        "---\n"
+        "name: from_body\n"
+        "description: body description\n"
+        "---\n"
+        "\n"
+        "# Body content here\n"
+    )
+    make_body("bodies/dirskill/SKILL.md", body_text)
+
+    metadata = make_metadata("meta.json", {
+        "dirskill": {
+            "name": "metadata_wins",
+            "description": "metadata description",
+            "body_path": "dirskill/SKILL.md",
+            "assets_dir": "dirskill",
+            "claude": {"user-invocable": True, "allowed-tools": "Read"},
+        },
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, tmp_path / "bodies", out)
+
+    text = (out / "dirskill" / "SKILL.md").read_text()
+    # Metadata wins on conflict
+    assert "name: metadata_wins" in text
+    assert "name: from_body" not in text
+    assert "description: metadata description" in text
+    # Original body frontmatter must be stripped from the body content
+    body_part = text.split("---", 2)[-1]
+    assert body_part.lstrip().startswith("# Body content here")
+
+
+def test_claude_flat_skill_does_not_parse_body_frontmatter(tmp_path, make_metadata, make_body, claude_assembler):
+    # Flat skill: body frontmatter (if any) is treated as literal text, NOT merged.
+    body_text = "---\nname: ignored\n---\nflat body\n"
+    make_body("bodies/flat.md", body_text)
+
+    metadata = make_metadata("meta.json", {
+        "flat": {"name": "flat", "description": "x", "claude": {"user-invocable": False, "allowed-tools": "Read"}},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, tmp_path / "bodies", out)
+
+    text = (out / "flat" / "SKILL.md").read_text()
+    # Body's literal --- block is preserved as content; no merging happens.
+    assert text.count("---") >= 4  # one frontmatter pair + literal pair in body
+    assert "name: flat" in text

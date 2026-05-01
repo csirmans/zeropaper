@@ -23,6 +23,37 @@ def format_value(value):
     return str(value)
 
 
+def split_frontmatter(text):
+    """Split a string into (frontmatter_dict, body_str). Returns ({}, text)
+    if the string does not begin with a '---' frontmatter block.
+
+    Only supports flat 'key: value' lines (sufficient for skill SKILL.md files
+    in this codebase). Raises ValueError on malformed input where a frontmatter
+    block is opened but not closed."""
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        return {}, text
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+    closing = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            closing = idx
+            break
+    if closing is None:
+        raise ValueError("frontmatter block opened but not closed")
+    fm = {}
+    for raw in lines[1:closing]:
+        line = raw.rstrip("\n").rstrip("\r")
+        if not line.strip():
+            continue
+        if ":" not in line:
+            raise ValueError(f"malformed frontmatter line: {line!r}")
+        key, _, value = line.partition(":")
+        fm[key.strip()] = value.strip().strip('"')
+    return fm, "".join(lines[closing + 1:])
+
+
 def render_skill(metadata, body):
     lines = ["---"]
     for key in FRONTMATTER_ALLOWLIST:
@@ -80,12 +111,22 @@ def main():
 
         body_rel = skill_metadata.get("body_path", f"{skill_id}.md")
         body_path = bodies_dir / body_rel
-        body = body_path.read_text()
+        raw_body = body_path.read_text()
 
         assets_rel = skill_metadata.get("assets_dir")
         is_directory_shape = assets_rel is not None
 
-        normalized = normalize_metadata(skill_metadata)
+        if is_directory_shape:
+            body_fm, body = split_frontmatter(raw_body)
+            # Build the merged metadata: start with body frontmatter, then
+            # let the metadata-file values override on conflict.
+            merged = dict(body_fm)
+            merged.update(skill_metadata)
+            normalized = normalize_metadata(merged)
+        else:
+            body = raw_body
+            normalized = normalize_metadata(skill_metadata)
+
         rendered = render_skill(normalized, body)
 
         if is_directory_shape:
