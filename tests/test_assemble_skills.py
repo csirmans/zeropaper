@@ -316,3 +316,39 @@ def test_codex_dir_skill_merges_body_frontmatter(tmp_path, make_metadata, make_b
     assert "name: metadata_wins" in text
     assert "name: from_body" not in text
     assert "description: meta desc" in text
+
+
+def test_codex_dir_skill_drops_claude_only_body_keys(tmp_path, make_metadata, make_body, codex_assembler):
+    # CorbisStarter-shaped SKILL.md: body frontmatter carries Claude-targeted
+    # keys (allowed-tools, argument-hint) that Codex must silently ignore.
+    body_text = (
+        "---\n"
+        "name: corbis_shaped\n"
+        "description: from body\n"
+        "allowed-tools: Read, Write, Bash\n"
+        "argument-hint: <topic>\n"
+        "---\n"
+        "\n"
+        "Body content.\n"
+    )
+    make_body("bodies/corbis_shaped/SKILL.md", body_text)
+
+    metadata = make_metadata("meta.json", {
+        "corbis_shaped": {
+            "name": "corbis_shaped",
+            "description": "metadata desc",
+            "body_path": "corbis_shaped/SKILL.md",
+            "assets_dir": "corbis_shaped",
+        },
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    # Must not raise.
+    codex_assembler(metadata, tmp_path / "bodies", out)
+
+    text = (out / "corbis_shaped" / "SKILL.md").read_text()
+    assert "name: corbis_shaped" in text
+    assert "description: metadata desc" in text
+    # Claude-targeted keys must NOT appear in Codex output.
+    assert "allowed-tools" not in text
+    assert "argument-hint" not in text

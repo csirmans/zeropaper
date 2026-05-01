@@ -8,13 +8,6 @@ from pathlib import Path
 # what the Codex CLI consumes; if Codex starts honoring more keys, extend here.
 FRONTMATTER_ALLOWLIST = ("name", "description")
 
-# Keys consumed by the assembler and never written to output frontmatter.
-INTERNAL_KEYS = {
-    "claude", "codex", "gemini",
-    "pipeline_only", "manual_only",
-    "body_path", "assets_dir",
-}
-
 
 def skill_passes_mode_filter(skill_metadata, mode):
     if mode == "autonomous" and skill_metadata.get("manual_only"):
@@ -25,16 +18,15 @@ def skill_passes_mode_filter(skill_metadata, mode):
 
 
 def normalize_metadata(skill_metadata):
-    normalized = {}
-    for key, value in skill_metadata.items():
-        if key == "codex":
-            # Codex runtime-overrides today are model/effort hints, not
-            # frontmatter — drop them entirely from the SKILL.md output.
-            continue
-        if key in INTERNAL_KEYS:
-            continue
-        normalized[key] = value
-    return normalized
+    """Pass through ONLY the keys Codex emits as frontmatter; drop everything
+    else silently. This includes Claude-targeted keys (allowed-tools,
+    argument-hint, user-invocable) that may appear in body frontmatter when a
+    SKILL.md serves both Claude and Codex."""
+    return {
+        key: value
+        for key, value in skill_metadata.items()
+        if key in FRONTMATTER_ALLOWLIST
+    }
 
 
 def split_frontmatter(text):
@@ -67,12 +59,6 @@ def render_skill(metadata, body):
     for key in FRONTMATTER_ALLOWLIST:
         if key in metadata:
             lines.append(f"{key}: {metadata[key]}")
-    extras = set(metadata) - set(FRONTMATTER_ALLOWLIST)
-    if extras:
-        raise ValueError(
-            f"unexpected metadata keys after normalization: {sorted(extras)}; "
-            f"add to FRONTMATTER_ALLOWLIST or INTERNAL_KEYS"
-        )
     lines.extend(["---", "", body.rstrip(), ""])
     return "\n".join(lines)
 
