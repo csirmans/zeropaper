@@ -734,6 +734,129 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     echo "  ✓ .env copied from template repo"
 fi
 
+# ── Ensure .env exists and has CORBIS_API_KEY ──
+touch "$P/.env"
+if ! grep -q "^CORBIS_API_KEY=" "$P/.env"; then
+    cat >> "$P/.env" <<'CORBIS_ENV_EOF'
+
+# Corbis MCP API key (https://www.corbis.ai → Settings → API Keys)
+# Optional but strongly recommended. Without it, the pipeline falls back
+# to OpenAlex + WebSearch for all literature queries (still functional,
+# but lower quality semantic search and no per-journal top-cited).
+CORBIS_API_KEY=
+CORBIS_ENV_EOF
+    echo "  ✓ Appended CORBIS_API_KEY= to .env"
+fi
+
+# ── Write Claude MCP config (.mcp.json) ──
+cat > "$P/.mcp.json" <<'MCP_JSON_EOF'
+{
+  "mcpServers": {
+    "corbis": {
+      "type": "http",
+      "url": "https://www.corbis.ai/api/mcp/universal?apikey=${CORBIS_API_KEY}"
+    }
+  }
+}
+MCP_JSON_EOF
+echo "  ✓ Wrote .mcp.json (Claude Code reads this automatically)"
+
+# ── Codex MCP setup deferred — Codex CLI's HTTP-MCP support varies by version ──
+cat > "$P/CORBIS_CODEX_MANUAL_SETUP.md" <<'CODEX_MD_EOF'
+# Corbis MCP — manual setup for Codex
+
+The current installed Codex CLI does not accept HTTP-style
+`[mcp_servers.<name>]` blocks with `url` and `bearer_token_env_var`.
+Setup deferred Codex MCP config to manual configuration.
+
+## Secret-handling rules (read first)
+
+- **Never commit a config file that contains your literal Corbis API key.**
+- **Prefer env-var or header-based auth.** If your Codex build supports
+  `bearer_token_env_var`, `env_http_headers`, or any `${ENV_VAR}` URL
+  expansion, use it and reference `CORBIS_API_KEY` from `.env` rather
+  than embedding the literal key.
+- **Project-scoped config (`./.codex/config.toml`) is safe ONLY if it
+  contains `${CORBIS_API_KEY}` or equivalent — not the literal key.** A
+  project-scoped file with a literal key is a leak waiting to happen
+  (it travels with the repo and gets committed by accident).
+- **If your Codex build requires a literal key in config**, you have two
+  acceptable options:
+  1. Put the config in **user-global private config** (`~/.codex/config.toml`),
+     which lives outside any repo and is not at risk of being committed.
+  2. Or, before writing a project-local config file, add it to the
+     project's `.gitignore` first: `echo ".codex/config.toml" >> .gitignore`
+     and commit that gitignore change before adding the key.
+
+## Steps
+
+1. Confirm your Codex build's MCP config format. `codex mcp list` and
+   `codex mcp add --help` document the supported shape. Note whether it
+   accepts env-var expansion or requires a literal key.
+2. Read `CORBIS_API_KEY` from `.env` (this directory).
+3. Add a Corbis MCP entry per your Codex build's expected format,
+   following the secret-handling rules above. The server URL is:
+       https://www.corbis.ai/api/mcp/universal
+   With env-var expansion (preferred):
+       url = "https://www.corbis.ai/api/mcp/universal?apikey=${CORBIS_API_KEY}"
+   Or, if HTTP-with-Bearer is supported:
+       bearer_token_env_var = "CORBIS_API_KEY"
+4. Restart Codex. Run `codex mcp list` to confirm.
+
+## What setup.sh did NOT do
+
+- It did not write any auto-config for Codex.
+- It did not modify `~/.codex/config.toml`.
+- It did not add `.codex/config.toml` to `.gitignore` (because no such
+  file was created). If you create one with a literal key, you must
+  add it to `.gitignore` yourself BEFORE adding the key.
+CODEX_MD_EOF
+echo "  ⚠ Codex MCP requires manual setup — see $P/CORBIS_CODEX_MANUAL_SETUP.md"
+
+# ── Gemini MCP setup deferred — Gemini CLI's MCP support varies by version ──
+cat > "$P/CORBIS_GEMINI_MANUAL_SETUP.md" <<'GEMINI_MD_EOF'
+# Corbis MCP — manual setup for Gemini
+
+Setup deferred Gemini MCP config because the integration shape was
+not verified against the current Gemini CLI build.
+
+## Secret-handling rules (read first)
+
+- **Never commit a config file that contains your literal Corbis API key.**
+- **Prefer env-var or header-based auth.** If your Gemini build supports
+  any `${ENV_VAR}` expansion in MCP server config, use it and reference
+  `CORBIS_API_KEY` from `.env` rather than embedding the literal key.
+- **Project-scoped config is safe ONLY if it contains `${CORBIS_API_KEY}`
+  or equivalent — not the literal key.**
+- **If Gemini requires a literal key in config**, two acceptable options:
+  1. Use user-global private config (outside any repo).
+  2. Or, before creating a project-local config file, add it to the
+     project's `.gitignore` first and commit the gitignore change before
+     writing the key.
+
+## Steps
+
+1. Check your Gemini CLI's MCP-server config docs (location and format
+   vary across Gemini releases — look for `gemini mcp` subcommands or the
+   settings.json schema). Note whether env-var expansion is supported.
+2. Read `CORBIS_API_KEY` from `.env` (this directory).
+3. Add a Corbis MCP entry per Gemini's expected format, following the
+   secret-handling rules above. The server URL is:
+       https://www.corbis.ai/api/mcp/universal
+   With env-var expansion (preferred):
+       url: "https://www.corbis.ai/api/mcp/universal?apikey=${CORBIS_API_KEY}"
+4. Restart Gemini.
+
+## What setup.sh did NOT do
+
+- It did not write any auto-config for Gemini.
+- It did not modify any user-global Gemini config files.
+- It did not add a project-local Gemini config to `.gitignore`. If you
+  create one and your build requires a literal key, you must gitignore
+  that file yourself BEFORE adding the key.
+GEMINI_MD_EOF
+echo "  ⚠ Gemini MCP requires manual setup — see $P/CORBIS_GEMINI_MANUAL_SETUP.md"
+
 # ── Install core Python deps ──
 if [ "$LOCAL" = "0" ]; then
     uv pip install sympy matplotlib -q 2>/dev/null \
@@ -852,6 +975,10 @@ python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
 mkdir -p "$P/code/utils/openalex"
 cp "$TEMPLATE_ROOT/templates/utils/openalex/"openalex.py "$P/code/utils/openalex/"
 chmod +x "$P/code/utils/openalex/"openalex.py
+
+mkdir -p "$P/code/utils/corbis"
+cp "$TEMPLATE_ROOT/templates/utils/corbis/"preflight.py "$P/code/utils/corbis/"
+chmod +x "$P/code/utils/corbis/"preflight.py
 
 echo "  ✓ Core skills assembled"
 
@@ -1256,6 +1383,16 @@ if [ "$MANUAL" = "1" ]; then
     git commit -m "setup: initialized ${VARIANT} variant toolkit (manual mode)" -q
 else
     git commit -m "setup: initialized ${VARIANT} variant pipeline" -q
+fi
+
+# ── Corbis key reminder ──
+KEY_VAL=$(grep -E "^CORBIS_API_KEY=" "$P/.env" 2>/dev/null | head -1 | cut -d= -f2-)
+if [ -z "$KEY_VAL" ] || [ "$KEY_VAL" = '""' ] || [ "$KEY_VAL" = "''" ]; then
+    echo ""
+    echo "⚠ CORBIS_API_KEY is not set in $P/.env."
+    echo "  The pipeline will fall back to OpenAlex + WebSearch for all literature queries."
+    echo "  To enable Corbis (recommended): get a key at https://www.corbis.ai → Settings → API Keys"
+    echo "  then edit $P/.env and set CORBIS_API_KEY=<your_key>"
 fi
 
 echo ""
