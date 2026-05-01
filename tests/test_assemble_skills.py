@@ -41,3 +41,57 @@ def test_codex_assembler_pins_existing_sympy_output(tmp_path, existing_skill, co
     assert "name: sympy" in text
     for forbidden in ("body_path:", "assets_dir:", "pipeline_only:", "manual_only:", "claude:", "codex:", "gemini:"):
         assert forbidden not in text, f"frontmatter must not leak internal key: {forbidden}"
+
+
+def test_claude_mode_autonomous_skips_manual_only(tmp_path, make_metadata, make_body, claude_assembler):
+    bodies = tmp_path / "bodies"
+    bodies.mkdir()
+    make_body("bodies/keep.md", "kept body")
+    make_body("bodies/skip.md", "skipped body")
+
+    metadata = make_metadata("meta.json", {
+        "keep": {"name": "keep", "description": "always", "claude": {"user-invocable": False, "allowed-tools": "Read"}},
+        "skip": {"name": "skip", "description": "manual only", "manual_only": True, "claude": {"user-invocable": True, "allowed-tools": "Read"}},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, bodies, out, mode="autonomous")
+
+    assert (out / "keep" / "SKILL.md").exists()
+    assert not (out / "skip" / "SKILL.md").exists()
+
+
+def test_claude_mode_manual_skips_pipeline_only(tmp_path, make_metadata, make_body, claude_assembler):
+    bodies = tmp_path / "bodies"
+    bodies.mkdir()
+    make_body("bodies/keep.md", "kept body")
+    make_body("bodies/skip.md", "skipped body")
+
+    metadata = make_metadata("meta.json", {
+        "keep": {"name": "keep", "description": "always", "claude": {"user-invocable": True, "allowed-tools": "Read"}},
+        "skip": {"name": "skip", "description": "pipeline only", "pipeline_only": True, "claude": {"user-invocable": False, "allowed-tools": "Read"}},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, bodies, out, mode="manual")
+
+    assert (out / "keep" / "SKILL.md").exists()
+    assert not (out / "skip" / "SKILL.md").exists()
+
+
+def test_claude_mode_omitted_emits_both(tmp_path, make_metadata, make_body, claude_assembler):
+    bodies = tmp_path / "bodies"
+    bodies.mkdir()
+    make_body("bodies/a.md", "a body")
+    make_body("bodies/b.md", "b body")
+
+    metadata = make_metadata("meta.json", {
+        "a": {"name": "a", "description": "x", "manual_only": True, "claude": {"user-invocable": True, "allowed-tools": "Read"}},
+        "b": {"name": "b", "description": "x", "pipeline_only": True, "claude": {"user-invocable": False, "allowed-tools": "Read"}},
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, bodies, out)  # no mode
+
+    assert (out / "a" / "SKILL.md").exists()
+    assert (out / "b" / "SKILL.md").exists()

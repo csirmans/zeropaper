@@ -34,11 +34,20 @@ def normalize_metadata(skill_metadata):
     return normalized
 
 
+def skill_passes_mode_filter(skill_metadata, mode):
+    if mode == "autonomous" and skill_metadata.get("manual_only"):
+        return False
+    if mode == "manual" and skill_metadata.get("pipeline_only"):
+        return False
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--metadata", required=True)
     parser.add_argument("--bodies-dir", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--mode", choices=["autonomous", "manual"], default=None)
     args = parser.parse_args()
 
     metadata = json.loads(Path(args.metadata).read_text())
@@ -47,6 +56,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for skill_id, skill_metadata in metadata.items():
+        if not skill_passes_mode_filter(skill_metadata, args.mode):
+            continue
         body_path = bodies_dir / f"{skill_id}.md"
         body = body_path.read_text()
         skill_dir = output_dir / skill_id
