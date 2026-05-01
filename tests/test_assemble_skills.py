@@ -95,3 +95,37 @@ def test_claude_mode_omitted_emits_both(tmp_path, make_metadata, make_body, clau
 
     assert (out / "a" / "SKILL.md").exists()
     assert (out / "b" / "SKILL.md").exists()
+
+
+def test_claude_internal_keys_do_not_leak_to_frontmatter(tmp_path, make_metadata, make_body, claude_assembler):
+    bodies = tmp_path / "bodies"
+    bodies.mkdir()
+    make_body("bodies/foo.md", "body")
+
+    metadata = make_metadata("meta.json", {
+        "foo": {
+            "name": "foo",
+            "description": "test",
+            "pipeline_only": True,
+            "body_path": "foo.md",
+            "assets_dir": None,
+            "claude": {"user-invocable": False, "allowed-tools": "Read"},
+            "codex": {"model": "gpt-5.5"},
+            "gemini": {"model": "gemini-3-flash-preview"},
+        },
+    })
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, bodies, out)
+
+    text = (out / "foo" / "SKILL.md").read_text()
+    for forbidden in (
+        "pipeline_only:", "manual_only:", "body_path:", "assets_dir:",
+        "codex:", "gemini:",
+    ):
+        assert forbidden not in text, f"internal key {forbidden} leaked into frontmatter"
+    # Allowed keys still present:
+    assert "name: foo" in text
+    assert "description: test" in text
+    assert "user-invocable: false" in text
+    assert "allowed-tools: Read" in text

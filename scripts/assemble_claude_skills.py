@@ -3,7 +3,17 @@ import argparse
 import json
 from pathlib import Path
 
-FIELD_ORDER = ["name", "description", "user-invocable", "argument-hint", "allowed-tools"]
+# Frontmatter keys allowed in assembled SKILL.md output. Order is the emit order.
+FRONTMATTER_ALLOWLIST = ("name", "description", "user-invocable", "argument-hint", "allowed-tools")
+
+# Keys consumed by the assembler (never written to output frontmatter).
+# Includes runtime-override blocks (claude/codex/gemini), filter flags, and
+# directory-shaped skill resolution fields.
+INTERNAL_KEYS = {
+    "claude", "codex", "gemini",
+    "pipeline_only", "manual_only",
+    "body_path", "assets_dir",
+}
 
 
 def format_value(value):
@@ -14,21 +24,29 @@ def format_value(value):
 
 def render_skill(metadata, body):
     lines = ["---"]
-    for key in FIELD_ORDER:
+    for key in FRONTMATTER_ALLOWLIST:
         if key in metadata:
             lines.append(f"{key}: {format_value(metadata[key])}")
-    for key, value in metadata.items():
-        if key not in FIELD_ORDER:
-            lines.append(f"{key}: {format_value(value)}")
+    # Anything outside the allowlist is a bug — fail loudly rather than leak it.
+    extras = set(metadata) - set(FRONTMATTER_ALLOWLIST)
+    if extras:
+        raise ValueError(
+            f"unexpected metadata keys after normalization: {sorted(extras)}; "
+            f"add to FRONTMATTER_ALLOWLIST or INTERNAL_KEYS"
+        )
     lines.extend(["---", "", body.rstrip(), ""])
     return "\n".join(lines)
 
 
 def normalize_metadata(skill_metadata):
+    """Flatten the runtime-specific block (claude:) for Claude output and
+    drop all other internal keys."""
     normalized = {}
     for key, value in skill_metadata.items():
         if key == "claude":
             normalized.update(value)
+        elif key in INTERNAL_KEYS:
+            continue
         else:
             normalized[key] = value
     return normalized
