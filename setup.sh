@@ -373,6 +373,7 @@ if [ "$MANUAL" = "1" ]; then
         --metadata "$TEMPLATE_ROOT/templates/skill_metadata/codex_math_skills.json"
         --metadata "$TEMPLATE_ROOT/templates/skill_metadata/bib_verify_skills.json"
         --metadata "$TEMPLATE_ROOT/templates/skill_metadata/openalex_skills.json"
+        --metadata "$TEMPLATE_ROOT/templates/skill_metadata/corbis_skills.json"
     )
     for ext in "${EXTENSIONS[@]}"; do
         case "$ext" in
@@ -782,6 +783,20 @@ assemble_claude_skills \
 python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/codex_math_skills.json" \
     --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/codex_math" \
+    --output-dir "$CODEX_SKILLS_OUT" \
+    --mode "$SKILL_MODE"
+
+# Corbis MCP skill (available for all variants — preloaded into literature-touching subagents)
+assemble_claude_skills \
+    "$TEMPLATE_ROOT" \
+    "$TEMPLATE_ROOT/templates/skill_metadata/corbis_skills.json" \
+    "$TEMPLATE_ROOT/templates/skill_bodies/corbis" \
+    "$SKILLS_OUT" \
+    "$SKILL_MODE"
+
+python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
+    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/corbis_skills.json" \
+    --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/corbis" \
     --output-dir "$CODEX_SKILLS_OUT" \
     --mode "$SKILL_MODE"
 

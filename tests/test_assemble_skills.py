@@ -352,3 +352,36 @@ def test_codex_dir_skill_drops_claude_only_body_keys(tmp_path, make_metadata, ma
     # Claude-targeted keys must NOT appear in Codex output.
     assert "allowed-tools" not in text
     assert "argument-hint" not in text
+
+
+def test_corbis_pipeline_skill_assembles_through_claude(tmp_path, claude_assembler):
+    from tests.conftest import SKILL_METADATA_DIR, SKILL_BODIES_DIR
+    metadata = SKILL_METADATA_DIR / "corbis_skills.json"
+    bodies = SKILL_BODIES_DIR / "corbis"
+    out = tmp_path / "out"
+    out.mkdir()
+    claude_assembler(metadata, bodies, out)
+    skill_md = out / "corbis" / "SKILL.md"
+    assert skill_md.exists()
+    text = skill_md.read_text()
+    assert "name: corbis" in text
+    assert "user-invocable: false" in text
+    # No internal-key leak
+    for forbidden in ("claude:", "codex:", "gemini:", "pipeline_only:", "manual_only:"):
+        assert forbidden not in text
+
+
+def test_corbis_pipeline_skill_assembles_through_codex(tmp_path, codex_assembler):
+    from tests.conftest import SKILL_METADATA_DIR, SKILL_BODIES_DIR
+    metadata = SKILL_METADATA_DIR / "corbis_skills.json"
+    bodies = SKILL_BODIES_DIR / "corbis"
+    out = tmp_path / "out"
+    out.mkdir()
+    codex_assembler(metadata, bodies, out)
+    skill_md = out / "corbis" / "SKILL.md"
+    assert skill_md.exists()
+    text = skill_md.read_text()
+    assert "name: corbis" in text
+    # Codex frontmatter only allows name and description; no Claude-targeted keys
+    assert "user-invocable" not in text
+    assert "allowed-tools" not in text
