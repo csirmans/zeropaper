@@ -678,6 +678,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "theory_version": 1,
   "referee_round": 0,
   "reject_cosmetic_round": 0,
+  "target_journal_tier": "top-5",
   "pivot_round": 0,
   "fix_empirics_round": 0,
   "bib_verify_round": 0,
@@ -690,6 +691,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "seeded": true,
   "scores": {},
   "stage2b_theory_version": null,
+  "archived_best_score_r1": null,
   "stage1_candidates": [],
   "history": []
 }
@@ -704,6 +706,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "theory_version": 1,
   "referee_round": 0,
   "reject_cosmetic_round": 0,
+  "target_journal_tier": "top-5",
   "pivot_round": 0,
   "fix_empirics_round": 0,
   "bib_verify_round": 0,
@@ -716,6 +719,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "status": "not_started",
   "scores": {},
   "stage2b_theory_version": null,
+  "archived_best_score_r1": null,
   "stage1_candidates": [],
   "history": []
 }

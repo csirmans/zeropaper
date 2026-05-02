@@ -58,14 +58,14 @@ If a user asks to create/set up/start a new research project, run `setup.sh` for
 ./setup.sh <project-name> --variant finance --manual --ext empirical
 ```
 
-`--manual` is mutually exclusive with `--seed`. It assembles `core_manual.md` instead of `core.md`, auto-generates an agent/skill catalog from the metadata files, swaps in per-runtime `session_manual.md` files, and skips creating `process_log/pipeline_state.json`, the `output/stage*` subdirs, and `dashboard.html`. Pipeline-only agents (`scribe`, `triager`, `puzzle-triager`, `branch-manager`) are still assembled into `.claude/agents/` etc. but flagged `pipeline_only: true` in metadata so `scripts/generate_catalog.py` hides them from the user-facing catalog.
+`--manual` is mutually exclusive with `--seed`. It assembles `core_manual.md` instead of `core.md`, auto-generates an agent/skill catalog from the metadata files, swaps in per-runtime `session_manual.md` files, and skips creating `process_log/pipeline_state.json`, the `output/stage*` subdirs, and `dashboard.html`. Pipeline-only agents (`scribe`, `editor`, `triager`, `puzzle-triager`, `branch-manager`) are still assembled into `.claude/agents/` etc. but flagged `pipeline_only: true` in metadata so `scripts/generate_catalog.py` hides them from the user-facing catalog.
 
 This creates a standalone project folder with assembled CLAUDE.md, AGENTS.md, GEMINI.md, agents for all runtimes, and skills. After setup, tell the user to:
 
 1. `cd <project-name>`
 2. Edit `.env` with any required API keys (FRED, WRDS, etc.)
 3. Launch any runtime: `claude --dangerously-skip-permissions` / `codex --sandbox danger-full-access --ask-for-approval never` / `gemini --yolo`
-4. Say "Run the pipeline."
+4. If this is autonomous mode, say "Run the pipeline." If this is manual mode, read the runtime doc's catalog and invoke the agent or skill they want.
 
 ### WRDS server (only with `--ext empirical`)
 
@@ -107,27 +107,38 @@ templates/
 │       └── session_manual.md    # Gemini toolkit guidance (manual mode)
 ├── agent_metadata/          # JSON metadata for agent assembly (tools, model, description)
 │   ├── claude_shared_agents.json
-│   ├── claude_finance_agents.json
-│   └── claude_macro_agents.json
+│   └── claude_variant_agents.json
 ├── agent_bodies/            # Shared/extension agent prompt bodies (plain markdown)
 │   └── shared/              # Domain-agnostic shared agent prompts
 ├── skill_metadata/          # JSON metadata for skill assembly
 │   ├── codex_math_skills.json
+│   ├── sympy_skills.json
+│   ├── bib_verify_skills.json
+│   ├── openalex_skills.json
+│   ├── corbis_skills.json
 │   ├── empirical_skills.json
 │   └── theory_llm_skills.json
 ├── skill_bodies/            # Skill prompt bodies (plain markdown)
 │   ├── codex_math/
+│   ├── sympy/
+│   ├── bib_verify/
+│   ├── openalex/
+│   ├── corbis/
 │   ├── empirical/
 │   └── theory_llm/
 ├── utils/                   # Utility scripts copied into deployed projects
-│   └── codex_math/          # Codex proof verification/writing/exploration scripts
+│   ├── codex_math/          # Codex proof verification/writing/exploration scripts
+│   ├── bib_verify/          # OpenAlex bibliography verifier
+│   ├── openalex/            # OpenAlex literature CLI
+│   └── corbis/              # Corbis MCP preflight marker
 ├── scoring/
 │   ├── finance.md           # Scoring calibrations for finance
 │   └── macro.md             # Scoring calibrations for macro
 ├── agents/                  # Variant agent prompt bodies (source of truth; no frontmatter)
-│   ├── shared/
 │   ├── finance/
 │   └── macro/
+├── paper_skeleton/          # main.tex + arpipeline.sty templates
+├── docs/                    # Deployed reference docs such as CORBIS_MCP_GUIDE.md
 └── gitignore_project        # .gitignore template for deployed projects
 
 scripts/
@@ -142,10 +153,14 @@ extensions/                  # Optional extensions (empirical, theory_llm)
 ├── empirical/
 │   ├── agent_metadata/      # shared_agents.json, finance_agents.json, macro_agents.json
 │   ├── agent_bodies/        # shared/, finance/, macro/
+│   ├── docs/                # Stage 3a runtime docs
+│   ├── skills/              # Legacy/source skill directories retained for reference
 │   └── utils/               # Python/shell utilities copied into project
 └── theory_llm/
     ├── agent_metadata/      # agents.json
     ├── agent_bodies/        # Agent prompt bodies
+    ├── docs/                # Stage 3b runtime docs
+    ├── skills/              # Legacy/source skill directories retained for reference
     └── llm_client.py        # LLM client copied into project
 
 setup.sh                     # Clones repo, assembles CLAUDE.md + AGENTS.md + GEMINI.md + agents + skills
@@ -173,7 +188,11 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 
 | Skill | Description |
 |-------|-------------|
+| `sympy` | Symbolic math verification for derivatives, signs, simplification, roots, and calibration sanity checks. |
 | `codex-math` | OpenAI Codex (gpt-5.5) for proof verification, writing, and exploration. Erratic genius — substantial false-positive rate, always triage. Scripts at `code/utils/codex_math/`. |
+| `openalex` | Structured literature search, citation traversal, and DOI/title verification through OpenAlex. Scripts at `code/utils/openalex/`. |
+| `corbis` | Domain-specialized finance/economics literature search through Corbis MCP, with OpenAlex/WebSearch fallback. |
+| `bib-verify` | Deterministic bibliography verification against OpenAlex. Scripts at `code/utils/bib_verify/`. |
 
 ## How setup.sh works
 
@@ -181,22 +200,24 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 2. Reads `--variant` flag (default: `finance`)
 3. Assembles runtime docs (CLAUDE.md, AGENTS.md, GEMINI.md):
    - Reads `templates/shared/core.md` (runtime-agnostic orchestrator)
-   - Injects runtime-specific session guidance from `templates/runtime/{runtime}/session.md`
+   - In autonomous mode, injects the shared Claude session guidance plus Codex/Gemini discipline blocks
+   - In manual mode, injects each runtime's `session_manual.md`
    - Injects `templates/scoring/{variant}.md` as `{{SCORING}}`
    - If `--seed`: injects `templates/shared/seed.md` as `{{SEED_OVERRIDE}}`
    - Replaces `{{PAPER_TYPE}}`, `{{TARGET_JOURNALS}}`, `{{DOMAIN_AREAS}}`, `{{RUNTIME_DOC_NAME}}`, `{{AGENT_DIR}}`, `{{SKILL_DIR}}`
 4. Assembles agents from metadata + prompt bodies:
    - Shared: `agent_metadata/claude_shared_agents.json` + `agent_bodies/shared/*.md`
-   - Variant: `agent_metadata/claude_{variant}_agents.json` + `agents/{variant}/*.md`
+   - Variant: `agent_metadata/claude_variant_agents.json` + `agents/{variant}/*.md`
    - Claude agents → `.claude/agents/*.md`, Codex → `.codex/agents/*.toml`, Gemini → `.gemini/agents/*.md`
 5. Injects variant context (paper type, journal list, domain) into key agents
-6. Creates project structure (output/, paper/, code/, etc.) and initial pipeline state
+6. Creates project structure (output/, paper/, code/, etc.) and, in autonomous mode, initial pipeline state
    - If `--seed`: creates `output/seed/` with a README, sets `pipeline_state.json` to start at `seed_triage` with `"seeded": true`
 7. Installs core Python deps (sympy, matplotlib) via `uv pip install`
 8. Assembles core skills:
    - Claude skills into `.claude/skills/`
    - Codex/Gemini skills into `.agents/skills/` (shared)
    - Copies utility scripts to `code/utils/`
+   - Writes Claude Code `.mcp.json` and `CORBIS_MCP_GUIDE.md` for Corbis MCP; Codex/Gemini setup is documented in the guide
 9. Applies extensions (`--ext empirical`, `--ext theory_llm`):
    - Assembles extension agents for all three runtimes
    - Assembles extension skills from shared skill metadata + bodies
@@ -205,7 +226,7 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 
 ## Adding a new variant
 
-1. Create agent metadata: `templates/agent_metadata/claude_{variant}_agents.json`
+1. Add or update entries in `templates/agent_metadata/claude_variant_agents.json`
 2. Create agent bodies: `templates/agents/{variant}/` with markdown prompts
 3. Create `templates/scoring/{variant}.md` with scoring calibrations
 4. Add variant config to `setup.sh` (paper type, target journals, journal list, domain areas)
@@ -235,9 +256,16 @@ Agents are either **shared** (identical across variants) or **variant-specific**
 - `math-auditor-freeform` — reads as skeptical reader
 - `scorer-freeform` — free-form quality assessment at Gate 4 (holistic read, no rubric)
 - `referee-freeform` — free-form referee report at Stage 6 (editorial assessment)
+- `referee-mechanism` — mechanism-focused Stage 6 referee
+- `editor` — aggregates Stage 6 referee reports into the Gate 5 verdict
+- `triager` — classifies self-attack, referee, and polish findings
+- `puzzle-triager` — routes contradictions between predictions and evidence
+- `debugger` — diagnoses tool-execution failures before substantive rescoping
 - `novelty-checker` — searches web for prior work
+- `bib-verifier` — verifies bibliography entries via OpenAlex with Corbis/WebSearch fallback
 - `paper-writer` — writes LaTeX from inputs
 - `style` — checks writing style
+- `polish-consistency`, `polish-formula`, `polish-numerics`, `polish-institutions`, `polish-equilibria`, `polish-bibliography` — Stage 9 polish agents
 - `branch-manager` — strategic advisor at Gate 4 + Stage 2 audit loop (every 3rd theory version); diagnoses ceiling/alternatives
 - `scribe` — documents the process
 

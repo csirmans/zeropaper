@@ -1,7 +1,7 @@
 # Corbis MCP Integration — Design
 
 **Date**: 2026-05-01
-**Status**: Architecture approved. Spec revised after two rounds of review. Ready for an implementation plan that begins with a prerequisite assembler refactor (Phase 0).
+**Status**: Historical architecture record. Phase 0-2 work has since landed and the operational source of truth is now `setup.sh`, `templates/docs/CORBIS_MCP_GUIDE.md`, `templates/skill_bodies/corbis/corbis.md`, and the Corbis-aware agent bodies. Keep the phase plan below as rationale, not as current implementation instructions.
 
 ## Summary
 

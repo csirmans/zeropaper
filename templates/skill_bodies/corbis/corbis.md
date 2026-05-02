@@ -4,9 +4,15 @@ Corbis is an MCP server providing domain-specialized literature search over a cu
 
 Use Corbis first when you want hybrid semantic + keyword search, per-journal top-cited rankings, batch full-text fetch, or BibTeX export of paper metadata. Use OpenAlex when you need forward/backward citation traversal (Corbis doesn't expose this), out-of-domain coverage (CS, hard sciences, pre-2000), or when Corbis returned no relevant results. Use WebSearch for SSRN, very recent uploads, blog posts, and news.
 
-## Read the preflight status before calling any Corbis tool
+## Read or create the preflight status before calling any Corbis tool
 
-A preflight marker runs once per session and writes `process_log/corbis_status.json`. Read that file before deciding any code path. Corbis auth is handled through the runtime MCP client's OAuth session.
+In autonomous mode, a preflight marker runs once per session and writes `process_log/corbis_status.json`. In manual mode, that file may not exist yet because setup intentionally skips pipeline state. If `process_log/corbis_status.json` is missing, run:
+
+```bash
+python3 code/utils/corbis/preflight.py
+```
+
+This creates `process_log/corbis_status.json` for Corbis capability discovery only; it does not create or require `process_log/pipeline_state.json`. Read the status file before deciding any code path. Corbis auth is handled through the runtime MCP client's OAuth session.
 
 The status file shape:
 

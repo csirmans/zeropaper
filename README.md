@@ -106,7 +106,7 @@ cd zeropaper
 ./setup.sh my-paper --variant finance --ext empirical --seed --light
 ```
 
-This creates `my-paper/` with everything assembled and ready — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, agents for all three runtimes, skills, and pipeline state. The folder is a standalone git repo detached from this template.
+In autonomous mode, this creates `my-paper/` with everything assembled and ready — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, agents for all three runtimes, skills, dashboard, and pipeline state. In manual mode, setup creates the same research toolkit but intentionally skips the dashboard, `process_log/pipeline_state.json`, and `output/stage*` pipeline subdirectories. The folder is a standalone git repo detached from this template.
 
 You can create as many projects as you want from the same template.
 
@@ -120,8 +120,8 @@ nano .env
 
 | Extension | Credentials needed |
 |-----------|-------------------|
-| `--ext empirical` | `FRED_API_KEY` (free, from [FRED](https://fred.stlouisfed.org/docs/api/api_key.html)), `WRDS_USER` + `WRDS_PASS` (from [WRDS](https://wrds-www.wharton.upenn.edu/)) |
-| `--ext theory_llm` | `UF_API_KEY` (from [UF NaviGator](https://api.ai.it.ufl.edu)) |
+| `--ext empirical` | `FRED_API_KEY` (free, from [FRED](https://fred.stlouisfed.org/docs/api/api_key.html)), `WRDS_USER` + `WRDS_PASS` (from [WRDS](https://wrds-www.wharton.upenn.edu/)), and `SEC_EDGAR_NAME` + `SEC_EDGAR_EMAIL` for EDGAR's identity header |
+| `--ext theory_llm` | One or both LLM backend keys: `UF_API_KEY` (from [UF NaviGator](https://api.ai.it.ufl.edu)) and `DEEPINFRA_TOKEN` (from [DeepInfra](https://deepinfra.com)) |
 
 ### Step 4: Launch
 
@@ -146,9 +146,9 @@ cd my-paper
 gemini --yolo
 ```
 
-Then say: **"Run the pipeline."**
+For autonomous projects, say: **"Run the pipeline."** For manual-mode projects, read the runtime doc's agent/skill catalog and invoke the tool you want.
 
-That's it. Claude Code reads `CLAUDE.md`; Codex reads `AGENTS.md`; Gemini reads `GEMINI.md`. In any runtime, the pipeline checks its state and runs autonomously from there. If the session ends mid-pipeline, relaunch the runtime and say "Run the pipeline" — it picks up where it left off.
+That's it for autonomous mode. Claude Code reads `CLAUDE.md`; Codex reads `AGENTS.md`; Gemini reads `GEMINI.md`. In any runtime, the pipeline checks its state and runs autonomously from there. If the session ends mid-pipeline, relaunch the runtime and say "Run the pipeline" — it picks up where it left off.
 
 ## Watch progress
 
@@ -159,9 +159,9 @@ cd my-paper
 python3 -m http.server 8000
 ```
 
-Open `http://localhost:8000/dashboard.html`. It auto-refreshes every 5 seconds showing current stage, scores, gate results, and event history.
+Open `http://localhost:8000/dashboard.html`. It auto-refreshes every 5 seconds showing current stage, scores, gate results, and event history. Manual-mode projects do not include the dashboard because there is no autonomous pipeline state.
 
-You can also watch files appear in real time in your editor, or run `git log --oneline` to see the commit history (the pipeline commits at stage transitions and gate decisions).
+You can also watch files appear in real time in your editor, or run `git log --oneline` to see the commit history. The runtime docs instruct the orchestrator to commit after file writes, stage transitions, gate decisions, and agent outputs.
 
 ## Variants
 
@@ -174,8 +174,8 @@ You can also watch files appear in real time in your editor, or run `git log --o
 
 | Extension | Flag | What it adds |
 |-----------|------|-------------|
-| **empirical** | `--ext empirical` | Stage 3a: empirical analysis with real data (CRSP, Compustat, FRED, Ken French, Chen-Zimmerman, WRDS) |
-| **theory_llm** | `--ext theory_llm` | Stage 3b: test predictions via LLM experiments using gpt-oss models (UF NaviGator) |
+| **empirical** | `--ext empirical` | Stage 3a: empirical analysis with real data including CRSP/Compustat/WRDS, FRED, Ken French, Chen-Zimmerman, EDGAR, Form 5500, mutual funds, and flex-mining helpers |
+| **theory_llm** | `--ext theory_llm` | Stage 3b: test predictions via LLM experiments using UF NaviGator gpt-oss models or DeepInfra-hosted models |
 
 Extensions are additive and combinable — they inject extra agents and skills without changing the core pipeline. Use multiple `--ext` flags to combine them.
 
@@ -203,9 +203,10 @@ Stage 2: Theory Development  → Gate 2: Math Audit (structured + free-form)
 Stage 3: Implications
 Stage 3a: Full Empirical Analysis (optional, if --ext empirical)
 Stage 3b: LLM Experiments         (optional, if --ext theory_llm)
+Puzzle Triage                     (if empirics, experiments, or lit-checks contradict predictions)
 Stage 4: Self-Attack          → Gate 4: Scorer Decision
 Stage 5: Paper Writing
-Stage 6: Referee Simulation   → Gate 5: Referee Decision
+Stage 6: Referee Simulation   → Editor aggregates 3 reports → Gate 5 decision
 Stage 7: Style Check
 Stage 8: Bibliography Verify
 Stage 9: Polish               → Done (six parallel polish agents — consistency,
@@ -219,27 +220,36 @@ Each gate is adversarial. Failed theories get revised, reworked, or abandoned. T
 
 | Agent | Role |
 |-------|------|
-| `literature-scout` | Web search for papers, builds literature map |
+| `literature-scout` | Literature search using Corbis, OpenAlex, WebSearch, and WebFetch |
+| `gap-scout` | Deep literature validation on selected gaps and implications |
 | `idea-generator` | Brainstorms candidate mechanisms |
 | `idea-reviewer` | Evaluates and ranks idea sketches |
 | `idea-prototyper` | Quick math feasibility check before full theory |
 | `theory-generator` | Develops selected idea into full model with proofs |
 | `math-auditor` | Step-by-step derivation verification |
 | `math-auditor-freeform` | Skeptical reader audit |
-| `novelty-checker` | Web search to verify result is genuinely new |
+| `novelty-checker` | Corbis/OpenAlex/WebSearch novelty check for ideas and theories |
 | `theory-explorer` | Computational verification — calibration, parameter space, plots |
+| `debugger` | Diagnoses tool-execution failures before treating them as substantive failures |
 | `self-attacker` | Finds every possible weakness |
 | `scorer` | Quality gate: advance/revise/abandon decisions |
+| `scorer-freeform` | Holistic Gate 4 quality assessment without the structured rubric |
+| `branch-manager` | Strategic audit of score plateaus, regeneration, and reject-deepening attempts |
 | `paper-writer` | Assembles LaTeX paper |
-| `referee` | Simulates top-journal R1 review |
+| `referee` | Structured simulated top-journal R1 review |
+| `referee-freeform` | Editorial publishability read at Stage 6 |
+| `referee-mechanism` | Checks whether the claimed mechanism is actually what the math delivers |
+| `editor` | Aggregates the three Stage 6 referee reports into the Gate 5 routing verdict |
+| `triager` | Classifies self-attack, referee, and polish findings into action buckets |
+| `puzzle-triager` | Routes contradictions between predictions and evidence |
 | `style` | Enforces writing style guide |
 | `polish-consistency` | Cross-section contradictions, label/object mismatches, headings vs. text |
 | `polish-formula` | Re-derives every numbered equation in the rendered paper (codex-math + sympy) |
 | `polish-numerics` | Recomputes every numerical claim from stated parameters |
 | `polish-institutions` | Verifies real-world claims and faithful characterization of cited papers |
 | `polish-equilibria` | Catches multiple equilibria, missing LLN/continuum assumptions, reduced-form/structural bridges |
-| `polish-bibliography` | Per-citation prose-claim verification via OpenAlex |
-| `bib-verifier` | Verifies cite-key validity against OpenAlex |
+| `polish-bibliography` | Per-citation prose-claim verification via Corbis/OpenAlex/WebFetch |
+| `bib-verifier` | Verifies cite-key validity against OpenAlex with Corbis enrichment and WebSearch fallback |
 | `scribe` | Background documentation of the process |
 | `empiricist` | Empirical analysis (if `--ext empirical`) |
 | `empirics-auditor` | Verifies empirical code and results (if `--ext empirical`) |
@@ -250,7 +260,11 @@ Each gate is adversarial. Failed theories get revised, reworked, or abandoned. T
 
 | Skill | Runtime | Purpose |
 |-------|---------|---------|
-| `codex-math` | Claude + Codex | OpenAI Codex (gpt-5.4) for proof verification, proof writing, derivation checking, and conjecture exploration |
+| `sympy` | All runtimes | Symbolic algebra checks for derivatives, signs, simplification, roots, and calibration sanity checks |
+| `codex-math` | All runtimes | OpenAI Codex (gpt-5.5) for proof verification, proof writing, derivation checking, and conjecture exploration |
+| `openalex` | All runtimes | Structured literature queries, DOI/title verification, and citation traversal against OpenAlex |
+| `corbis` | Installed for all runtimes | Domain-specialized finance/economics literature search through Corbis MCP, with OpenAlex/WebSearch fallback. `setup.sh` auto-configures Claude Code via `.mcp.json`; Codex/Gemini users should follow `CORBIS_MCP_GUIDE.md` for MCP setup. |
+| `bib-verify` | All runtimes | Deterministic bibliography verification against OpenAlex, with triage output for fixes |
 
 ## Data skills (with `--ext empirical`)
 
@@ -258,6 +272,7 @@ Each gate is adversarial. Failed theories get revised, reworked, or abandoned. T
 |-------|--------|------|
 | `edgar` | SEC EDGAR filings, statements, and full-text filing search | None (identity header required) |
 | `flex-mining` | Flexible empirical spec and robustness workflow support | None |
+| `form-5500` | DOL EBSA Form 5500 ERISA plan filings | None |
 | `fred` | FRED — 800K+ macro/financial time series | API key (free) |
 | `ken-french` | Ken French Data Library — factor returns, portfolios | None |
 | `chen-zimmerman` | Open Source Asset Pricing — 200+ anomaly signals | None |
@@ -272,6 +287,8 @@ my-paper/
 ├── AGENTS.md                 # Codex orchestration (assembled by setup.sh)
 ├── GEMINI.md                 # Gemini CLI orchestration (assembled by setup.sh)
 ├── .env                      # API keys (gitignored)
+├── .mcp.json                 # Claude Code MCP config for Corbis
+├── CORBIS_MCP_GUIDE.md       # Corbis setup and troubleshooting
 ├── dashboard.html            # Live progress dashboard
 ├── .claude/
 │   ├── settings.json         # Sandbox config
@@ -284,9 +301,13 @@ my-paper/
 │   └── agents/               # Gemini subagents (.md)
 ├── .agents/
 │   └── skills/               # Shared skills (Codex + Gemini)
+├── docs/                     # Per-stage operating instructions
 ├── output/                   # Pipeline outputs by stage
+├── data/                     # Downloaded datasets and derived data files
+├── references/               # Source PDFs, notes, and reference materials
 ├── paper/                    # LaTeX paper
 │   ├── main.tex
+│   ├── arpipeline.sty        # Deployment-unique provenance watermark
 │   ├── sections/
 │   └── referee_reports/
 ├── code/
@@ -294,22 +315,24 @@ my-paper/
 │   ├── download/             # Data download helpers
 │   ├── explore/              # Exploration scripts and diagnostics
 │   ├── tmp/                  # Scratch files
-│   └── utils/                # Utility scripts (including codex-math; more with extensions)
+│   └── utils/                # codex_math, openalex, bib_verify, corbis; data helpers with extensions
 └── process_log/
     ├── pipeline_state.json   # Current stage, scores, history
     └── history.md
 ```
+
+Manual-mode projects omit `dashboard.html`, `process_log/pipeline_state.json`, and the `output/stage*` pipeline subdirectories because there is no autonomous pipeline state to track.
 
 ## Runtime notes
 
 - Claude Code: `claude --dangerously-skip-permissions`
 - Codex: `codex --sandbox danger-full-access --ask-for-approval never`
 - Gemini CLI: `gemini --yolo`
-- All runtimes read the same pipeline state and produce identical artifacts — you can switch runtimes mid-pipeline.
+- All runtimes read the same pipeline state and produce the same pipeline artifacts, so you can switch runtimes mid-pipeline. Corbis MCP is the setup-time exception: Claude Code is auto-configured, while Codex and Gemini may need the manual MCP steps in `CORBIS_MCP_GUIDE.md`.
 
 ## Safety
 
-Sandbox is pre-configured in `.claude/settings.json`:
+Claude Code's sandbox is pre-configured in `.claude/settings.json`:
 - Bash restricted to project folder only
 - Cannot read SSH keys or AWS credentials
 - WebSearch and WebFetch work freely (for literature search)

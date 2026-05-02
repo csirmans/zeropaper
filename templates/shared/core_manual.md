@@ -33,11 +33,12 @@ code/
 ├── download/             # Data download helpers
 ├── explore/              # Exploration scripts
 ├── tmp/                  # Scratch
-└── utils/                # Pre-built helpers (codex-math, openalex, bib-verify; more with extensions)
+└── utils/                # Pre-built helpers (codex-math, openalex, bib-verify, corbis; more with extensions)
 paper/
 ├── main.tex
 ├── sections/
 └── referee_reports/
+process_log/              # Optional: created on demand by utilities such as Corbis preflight
 ```
 
 Reference docs for each research step are also in `docs/` if you want to read how a particular step is normally handled.

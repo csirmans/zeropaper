@@ -1,5 +1,7 @@
 # Corbis Phase 0 — Assembler Refactor & Path Cleanup Implementation Plan
 
+> **Status:** Historical implementation plan. The assembler/path cleanup has landed; use `scripts/assemble_claude_skills.py`, `scripts/assemble_codex_skills.py`, `setup.sh`, and `tests/test_assemble_skills.py` as the current source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Refactor `scripts/assemble_claude_skills.py` and `scripts/assemble_codex_skills.py` to support directory-shaped skills, frontmatter merging, internal-key filtering, and `--mode autonomous|manual` filtering; fix the existing `.gemini/skills` vs `.agents/skills` inconsistency in `setup.sh`. Verify all existing skills assemble byte-for-byte identically before/after.

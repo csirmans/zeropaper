@@ -341,12 +341,13 @@ output/                   # Pipeline outputs by stage
 ├── stage2b/              # theory exploration report + figures/
 ├── stage3/               # implications.md
 ├── stage3a/              # empirical feasibility + full analysis (if --ext empirical)
-├── stage3b/  # LLM experiments (if --ext theory_llm)
+├── stage3b/              # LLM experiments (if --ext theory_llm)
+├── puzzle_triage/        # puzzle-triager reports
 ├── stage4/               # self-attack + scorer decision (versioned)
 ├── debug/                # debugger reports (launched on tool-execution failures)
 ├── post_pipeline/        # post-pipeline math audits
 code/
-├── utils/                # pre-built helpers (wrds_client, codex-math, download templates)
+├── utils/                # codex_math, openalex, bib_verify, corbis; data helpers with extensions
 ├── explore/              # theory-explorer scripts
 ├── tmp/                  # scratch/intermediate scripts
 paper/
