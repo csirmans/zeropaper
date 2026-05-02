@@ -6,13 +6,14 @@ Use Corbis first when you want hybrid semantic + keyword search, per-journal top
 
 ## Read the preflight status before calling any Corbis tool
 
-A preflight probe runs once per session and writes `process_log/corbis_status.json`. Read that file before deciding any code path. Do not infer availability from MCP error responses mid-run — that wastes API credits and produces noisy behavior.
+A preflight probe runs once per session and writes `process_log/corbis_status.json`. Read that file before deciding any code path. Corbis supports OAuth through the MCP client; a missing personal key is not a failure.
 
 The status file shape:
 
 ```
 {
   "available": true,
+  "auth_mode": "personal_mcp_key",
   "tools": ["search_papers", "get_paper_details_batch", ...],
   "capabilities": {
     "search":              "search_papers",
@@ -27,9 +28,13 @@ The status file shape:
 }
 ```
 
-If `available` is `false`, do not call Corbis. Run only OpenAlex + WebSearch for the task.
+Status meanings:
 
-If `available` is `true`, call Corbis tools by **capability name**, not by hard-coded tool name. Look up the actual tool name via `capabilities[<capability>]`. If a capability resolves to `null`, that capability is not exposed at the user's tier — fall back to the named alternative below.
+- `available: true` — the Python preflight verified Corbis with a personal MCP key. Use the verified capability map.
+- `available: null` — no personal key was visible to preflight; auth is handled by the runtime MCP client (OAuth or user-global client config). Use the default capability map in the status file as unverified expected tool names. Try Corbis if the runtime exposes the tools; if auth/tool access fails, fall back to OpenAlex + WebSearch.
+- `available: false` — a real probe was attempted and failed. Do not call Corbis unless the user fixes/authenticates the MCP server first. Run only OpenAlex + WebSearch for the task.
+
+When `available` is `true` or `null`, call Corbis tools by **capability name**, not by ad hoc tool names. Look up the actual or default tool name via `capabilities[<capability>]`. If a verified capability resolves to `null`, that capability is not exposed at the user's tier — fall back to the named alternative below.
 
 ## Capability reference and fallbacks
 
@@ -56,7 +61,7 @@ For forward/backward citation traversal (`cites`, `refs`), Corbis does not expos
 ## Rate limits and credit budget
 
 Current published Corbis limits (verify against live API responses; update this section if they differ):
-- 200 requests/hour per authenticated key
+- 200 requests/hour per authenticated user/key
 - 10 concurrent requests
 - 1 credit per tool call regardless of which tool
 

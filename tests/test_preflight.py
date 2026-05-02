@@ -28,7 +28,14 @@ def preflight():
     return _import_preflight()
 
 
-def test_writes_unavailable_when_key_missing(tmp_path, preflight):
+@pytest.fixture(autouse=True)
+def clear_corbis_env(monkeypatch):
+    """Keep host Corbis env vars from changing preflight test behavior."""
+    monkeypatch.delenv("CORBIS_MCP_API_KEY", raising=False)
+    monkeypatch.delenv("CORBIS_API_KEY", raising=False)
+
+
+def test_writes_oauth_unknown_when_key_missing(tmp_path, preflight):
     env_file = tmp_path / ".env"
     env_file.write_text("OTHER=value\n")
     out_file = tmp_path / "corbis_status.json"
@@ -37,33 +44,36 @@ def test_writes_unavailable_when_key_missing(tmp_path, preflight):
 
     assert rc == 0
     status = json.loads(out_file.read_text())
-    assert status["available"] is False
-    assert "key" in status["reason"].lower()
+    assert status["available"] is None
+    assert status["auth_mode"] == "client_managed_oauth"
+    assert status["capability_source"] == "default_unverified"
+    assert status["capabilities"]["search"] == "search_papers"
 
 
-def test_writes_unavailable_when_env_file_missing(tmp_path, preflight):
+def test_writes_oauth_unknown_when_env_file_missing(tmp_path, preflight):
     out_file = tmp_path / "corbis_status.json"
     rc = preflight.run(env_file=tmp_path / "no_such.env", output_file=out_file, _http_post=None)
 
     assert rc == 0
     status = json.loads(out_file.read_text())
-    assert status["available"] is False
+    assert status["available"] is None
+    assert status["auth_mode"] == "client_managed_oauth"
 
 
-def test_writes_unavailable_when_empty_key(tmp_path, preflight):
+def test_writes_oauth_unknown_when_empty_key(tmp_path, preflight):
     env_file = tmp_path / ".env"
-    env_file.write_text("CORBIS_API_KEY=\n")
+    env_file.write_text("CORBIS_MCP_API_KEY=\n")
     out_file = tmp_path / "corbis_status.json"
 
     rc = preflight.run(env_file=env_file, output_file=out_file, _http_post=None)
 
     assert rc == 0
-    assert json.loads(out_file.read_text())["available"] is False
+    assert json.loads(out_file.read_text())["available"] is None
 
 
 def test_writes_available_with_capability_map_on_success(tmp_path, preflight):
     env_file = tmp_path / ".env"
-    env_file.write_text('CORBIS_API_KEY=corbis_mcp_test123\n')
+    env_file.write_text('CORBIS_MCP_API_KEY=corbis_mcp_test123\n')
     out_file = tmp_path / "corbis_status.json"
 
     fake_response = json.dumps({
@@ -110,11 +120,14 @@ def test_writes_available_with_capability_map_on_success(tmp_path, preflight):
     assert len(posts) == 1
     body = json.loads(posts[0][2])
     assert body["method"] == "tools/list"
+    assert posts[0][0] == preflight.CORBIS_MCP_URL
+    assert posts[0][1]["Authorization"] == "Bearer corbis_mcp_test123"
+    assert "apikey=" not in posts[0][0]
 
 
 def test_synthesized_review_capability_resolves_when_literature_search_present(tmp_path, preflight):
     env_file = tmp_path / ".env"
-    env_file.write_text('CORBIS_API_KEY=corbis_mcp_test\n')
+    env_file.write_text('CORBIS_MCP_API_KEY=corbis_mcp_test\n')
     out_file = tmp_path / "corbis_status.json"
 
     fake_response = json.dumps({
@@ -133,7 +146,7 @@ def test_synthesized_review_capability_resolves_when_literature_search_present(t
 
 def test_writes_unavailable_on_http_error(tmp_path, preflight):
     env_file = tmp_path / ".env"
-    env_file.write_text('CORBIS_API_KEY=corbis_mcp_test\n')
+    env_file.write_text('CORBIS_MCP_API_KEY=corbis_mcp_test\n')
     out_file = tmp_path / "corbis_status.json"
 
     def fake_post(url, headers, body):
@@ -144,12 +157,13 @@ def test_writes_unavailable_on_http_error(tmp_path, preflight):
     assert rc == 0  # never blocks the pipeline
     status = json.loads(out_file.read_text())
     assert status["available"] is False
+    assert status["auth_mode"] == "personal_mcp_key"
     assert "connection refused" in status["reason"]
 
 
 def test_writes_unavailable_on_malformed_response(tmp_path, preflight):
     env_file = tmp_path / ".env"
-    env_file.write_text('CORBIS_API_KEY=corbis_mcp_test\n')
+    env_file.write_text('CORBIS_MCP_API_KEY=corbis_mcp_test\n')
     out_file = tmp_path / "corbis_status.json"
 
     rc = preflight.run(
@@ -164,7 +178,7 @@ def test_writes_unavailable_on_malformed_response(tmp_path, preflight):
 
 def test_creates_output_directory_if_missing(tmp_path, preflight):
     env_file = tmp_path / ".env"
-    env_file.write_text("\n")  # no key → unavailable, but should still write
+    env_file.write_text("\n")  # no key → OAuth/client-managed unknown, but should still write
     nested = tmp_path / "process_log" / "corbis_status.json"
 
     rc = preflight.run(env_file=env_file, output_file=nested, _http_post=None)
@@ -179,7 +193,7 @@ def test_writes_unavailable_on_jsonrpc_error_response(tmp_path, preflight):
     must treat this as unavailable, not silently emit available:true with
     an empty tool list."""
     env_file = tmp_path / ".env"
-    env_file.write_text('CORBIS_API_KEY=corbis_mcp_test\n')
+    env_file.write_text('CORBIS_MCP_API_KEY=corbis_mcp_test\n')
     out_file = tmp_path / "corbis_status.json"
 
     fake_response = json.dumps({
@@ -201,14 +215,12 @@ def test_writes_unavailable_on_jsonrpc_error_response(tmp_path, preflight):
 
 
 def test_read_env_key_prefers_last_non_empty_when_duplicates(tmp_path, preflight):
-    """If .env contains the empty CORBIS_API_KEY= line setup wrote plus a
-    later non-empty CORBIS_API_KEY=value the user appended, return the
-    user's value (matches shell .env-sourcing semantics)."""
+    """Return the latest non-empty personal MCP key for the preferred name."""
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "CORBIS_API_KEY=\n"
+        "CORBIS_MCP_API_KEY=\n"
         "OTHER=foo\n"
-        "CORBIS_API_KEY=corbis_mcp_real_key\n"
+        "CORBIS_MCP_API_KEY=corbis_mcp_real_key\n"
     )
     assert preflight.read_env_key(env_file) == "corbis_mcp_real_key"
 
@@ -216,8 +228,8 @@ def test_read_env_key_prefers_last_non_empty_when_duplicates(tmp_path, preflight
 def test_read_env_key_returns_none_when_all_duplicates_empty(tmp_path, preflight):
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "CORBIS_API_KEY=\n"
-        "CORBIS_API_KEY=\n"
+        "CORBIS_MCP_API_KEY=\n"
+        "CORBIS_MCP_API_KEY=\n"
     )
     assert preflight.read_env_key(env_file) is None
 
@@ -225,5 +237,28 @@ def test_read_env_key_returns_none_when_all_duplicates_empty(tmp_path, preflight
 def test_read_env_key_handles_single_non_empty_unchanged(tmp_path, preflight):
     """Regression: existing single-value behavior must not change."""
     env_file = tmp_path / ".env"
-    env_file.write_text("CORBIS_API_KEY=just_one\n")
+    env_file.write_text("CORBIS_MCP_API_KEY=just_one\n")
     assert preflight.read_env_key(env_file) == "just_one"
+
+
+def test_read_env_key_prefers_new_name_over_legacy_name(tmp_path, preflight):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "CORBIS_API_KEY=legacy_key\n"
+        "CORBIS_MCP_API_KEY=preferred_key\n"
+    )
+    assert preflight.read_env_key(env_file) == "preferred_key"
+
+
+def test_read_env_key_prefers_private_env_over_dotenv(tmp_path, preflight, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("CORBIS_MCP_API_KEY=dotenv_key\n")
+    monkeypatch.setenv("CORBIS_MCP_API_KEY", "private_env_key")
+
+    assert preflight.read_env_key(env_file) == "private_env_key"
+
+
+def test_read_env_key_falls_back_to_legacy_name(tmp_path, preflight):
+    env_file = tmp_path / ".env"
+    env_file.write_text("CORBIS_API_KEY=legacy_key\n")
+    assert preflight.read_env_key(env_file) == "legacy_key"
