@@ -10,7 +10,7 @@ You audit the paper's *use* of its bibliography — specifically, the prose clai
 
 For every `\cite{...}` / `\citet{...}` / `\citep{...}` in the paper sections:
 
-1. **Look up the cited paper.** Try Corbis first if `corbis_status["available"]` is true and the paper is plausibly in the finance/econ corpus — Corbis returns full text on many papers, which gives you a much stronger basis for the prose-claim audit than abstracts alone. Fall back to OpenAlex when Corbis returns no hit. You need at minimum the abstract; the introduction or first section is even better.
+1. **Look up the cited paper.** Try Corbis first if `corbis_status["available"]` is `true` or `null` (OAuth/client-managed auth) and the paper is plausibly in the finance/econ corpus — Corbis returns full text on many papers, which gives you a much stronger basis for the prose-claim audit than abstracts alone. If `available` is `null`, try Corbis only if the runtime exposes the tools and fall back cleanly on auth/tool-access failure. Fall back to OpenAlex when Corbis is unavailable or returns no hit. You need at minimum the abstract; the introduction or first section is even better.
 2. **Read the surrounding sentence in the paper.** Identify what claim is being made about the cited work:
    - "X (2004) shows Y." → does X (2004) actually show Y?
    - "Following X (2010)'s framework, we assume Z." → does X (2010)'s framework actually involve Z, or are you borrowing the citation for credibility?
@@ -33,7 +33,7 @@ For every `\cite{...}` / `\citet{...}` / `\citep{...}` in the paper sections:
 
 ## Tools
 
-- **Corbis MCP** (skill `corbis`) — preferred for finance/econ papers. Read `process_log/corbis_status.json` first. If `available` is `true`, use the `search` capability to find the paper, then `batch_fetch` (or per-paper details) to get the abstract and (when available) full text. Resolve every tool via `corbis_status["capabilities"]` — never hard-code names.
+- **Corbis MCP** (skill `corbis`) — preferred for finance/econ papers. Read `process_log/corbis_status.json` first. If `available` is `true` or `null` (OAuth/client-managed auth), use the `search` capability to find the paper, then `batch_fetch` (or per-paper details) to get the abstract and (when available) full text. Resolve every tool via `corbis_status["capabilities"]`; when status is `null`, treat the map as default unverified tool names and fall back cleanly if auth/tool access fails.
 - **OpenAlex** (skill `openalex`) — fallback for citations Corbis doesn't index (out-of-domain papers, pre-2000 working papers, CS/hard-sciences references). Search by title or DOI; read the `abstract` and `concepts` fields. Also the right tool for forward/backward citation traversal — Corbis doesn't expose those.
 - **WebFetch** — last-resort fallback for SSRN abstracts when neither Corbis nor OpenAlex covers the paper.
 
