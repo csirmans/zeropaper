@@ -1,7 +1,7 @@
 {
   "corbis": {
     "name": "corbis",
-    "description": "Use the Corbis MCP server for domain-specialized literature search over a curated finance/economics corpus. Hybrid semantic + keyword search, per-journal top-cited papers, batch full-text fetch, BibTeX export. OAuth through the MCP client is the default; personal MCP keys are optional for headless runs. Always reads process_log/corbis_status.json first to distinguish verified, client-managed/OAuth, and unavailable states and resolve capability-to-tool names. Falls back to OpenAlex (breadth) and WebSearch (grey lit) when Corbis returns nothing relevant or is unavailable.",
+    "description": "Use the Corbis MCP server for domain-specialized literature search over a curated finance/economics corpus. Hybrid semantic + keyword search, per-journal top-cited papers, batch full-text fetch, BibTeX export. OAuth through the MCP client is the supported auth path. Always reads process_log/corbis_status.json first, resolves capability-to-tool names, and falls back to OpenAlex (breadth) and WebSearch (grey lit) when Corbis returns nothing relevant or is unavailable.",
     "claude": {
       "user-invocable": false,
       "allowed-tools": "Bash, Read, Write"

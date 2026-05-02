@@ -1,10 +1,10 @@
 ## How to start a session
 
 1. Run the Corbis MCP preflight: `python3 code/utils/corbis/preflight.py`
-   - This writes `process_log/corbis_status.json` with `available: true|false|null` and a capability map.
-   - `true` means a personal MCP key verified tools; `false` means a real probe failed; `null` means no personal key was visible to preflight and Corbis may still be available through the MCP client's OAuth session.
-   - Exits 0 even when Corbis is unreachable or auth is client-managed — never blocks the pipeline.
-   - Runs on every launch and resume so a freshly authenticated OAuth session, rotated personal key, or now-available Corbis is picked up immediately.
+   - This writes `process_log/corbis_status.json` with `available: null` and a default capability map.
+   - `null` means Corbis auth is handled by the MCP client's OAuth session; the standalone preflight does not inspect runtime OAuth state.
+   - Exits 0 and never blocks the pipeline.
+   - Runs on every launch and resume so agents start from a fresh status marker.
 2. Read `process_log/pipeline_state.json`
    - If `status` is `"not_started"` and `"seeded"` is `true`: run data inventory (below), set to `"running"`, then follow the **Seeded idea mode** entry sequence (see above)
    - If `status` is `"not_started"`: run data inventory (below), set to `"running"`, begin Stage 0

@@ -15,11 +15,11 @@ Add the Corbis MCP server as a domain-specialized literature-search layer alongs
 ## Architectural principles (overrides any tactical choice that conflicts)
 
 1. **Novelty needs breadth, not precision.** Corbis (~250K curated finance/econ papers) cannot be the sole arbiter of novelty. OpenAlex (~250M works) is mandatory at Gates 1b and 3 for cross-subfield mechanism searches and forward/backward citation traversal. Both passes run; neither alone decides.
-2. **Detect Corbis once per session, not per call.** A preflight probe records `available: true|false|null` and a capability-to-tool mapping. `true` means a personal MCP key verified tools, `false` means a real probe failed, and `null` means auth is client-managed/OAuth and cannot be inspected by the standalone Python probe. Agents read this; they do not infer availability from 403s mid-run.
-3. **Tool set is not hard-coded.** Corbis docs explicitly say the tool list depends on account/key tier. Agents reference tools by capability ("the search tool," "the batch-fetch tool") and resolve to actual names from the preflight's capability map.
+2. **Record Corbis status once per session, not per call.** A preflight marker records `available: null` and a capability-to-tool mapping. `null` means auth is client-managed/OAuth and cannot be inspected by the standalone Python preflight. Agents read this marker, try runtime-exposed Corbis tools, and fall back cleanly on auth/tool-access failure.
+3. **Tool set is not hard-coded.** Corbis docs explicitly say the tool list depends on account tier. Agents reference tools by capability ("the search tool," "the batch-fetch tool") and resolve to actual names from the preflight's capability map.
 4. **bib_verify is stable infrastructure.** `code/utils/bib_verify/verify_bib.sh` and the `output/bib_verification.md` format do not change. Corbis becomes an optional first enrichment pass, never a replacement for deterministic DOI/title checks.
 5. **Audit before rewrite.** `polish-bibliography` audits citation claims; it never wholesale-regenerates BibTeX from Corbis IDs without explicit triager approval per citation.
-6. **Secrets stay out of tracked files.** No literal Corbis personal MCP key appears in any file under the project tree after `setup.sh` (do not assume a key prefix; check the actual configured value). OAuth is preferred. If a runtime client cannot use OAuth and cannot read env at MCP-server-launch time, the project file holding the key is added to `.gitignore` and we prefer Bearer/header-based auth where the client supports it.
+6. **No Corbis credentials in the project.** OAuth through the MCP client is the supported auth path. `setup.sh` does not write project-level Corbis credentials or credential placeholders.
 7. **Corbis result IDs are opaque.** Live smoke tests showed endpoint-specific IDs: `search_papers` may return OpenAlex-style `W...` IDs, while `top_cited_articles` may return Corbis UUIDs. Agents pass the exact `id` returned by Corbis into batch/detail/export calls; they do not substitute DOI input, which is not reliable for `batch_fetch`.
 
 ## Architecture
@@ -99,51 +99,48 @@ Goal: prove Corbis works reliably across all three runtimes before broadening su
 `setup.sh` writes per-runtime MCP config. **The implementation plan must verify each path against current docs and a real test before committing the runtime config it writes.**
 
 - **Claude**: project-local `.mcp.json` with the universal endpoint only (`https://www.corbis.ai/api/mcp/universal`). Authentication is OAuth-first; Claude Code opens the browser auth flow when needed.
-- **Codex**: Codex support varies by installed build, so setup emits manual instructions rather than writing unverified config. Preferred path: add the remote HTTP MCP URL and run Codex's MCP login/OAuth command. For headless runs, use `CORBIS_MCP_API_KEY` with bearer-token env-var support when available; URL `?apikey=` expansion is a fallback only.
-- **Gemini**: setup emits manual instructions until the installed Gemini MCP config shape is verified. Same auth preference: OAuth first, then personal MCP key through private env/header config.
+- **Codex**: Codex support varies by installed build, so setup emits manual instructions rather than writing unverified config. Preferred path: add the remote HTTP MCP URL and run Codex's MCP login/OAuth command.
+- **Gemini**: setup emits manual instructions until the installed Gemini MCP config shape is verified. Same auth preference: OAuth through the MCP client.
 
 ### 1.2 Secret handling
 
-- The deployed project's `.env` may not exist yet. Setup explicitly `touch "$P/.env"` and may add commented notes for optional `CORBIS_MCP_API_KEY`, but Corbis does **not** require a project env key for OAuth.
-- For each runtime, **test** that OAuth login or the configured personal-key method actually reaches the MCP server before declaring the integration done.
-- If a runtime requires the literal key in a config file (no env-var support), add that file to the deployed project's `.gitignore` and document the constraint in `setup.sh` output.
-- **Secret-leak acceptance test** (do not assume key prefix): with a real `CORBIS_MCP_API_KEY` populated, run `setup.sh`, then assert (a) the literal key value does not appear in any file matched by `git ls-files` in the deployed project tree, and (b) no tracked config contains a non-empty `apikey=<value>` URL parameter or any other literal credential. The test reads the key from `.env` and greps for that exact string.
+- The deployed project's `.env` may not exist yet. Setup explicitly `touch "$P/.env"` for the repo's other runtime settings, but Corbis does **not** use a project env credential.
+- For each runtime, **test** that OAuth login reaches the MCP server before declaring the integration done.
+- **Secret-leak acceptance test**: run `setup.sh`, then assert no generated Corbis config contains a credential-bearing URL parameter or literal credential.
 
-`CORBIS_MCP_API_KEY` is optional. If absent from both the process environment and `.env`, setup completes without warning and the preflight in §1.3 records `available: null` so agents know OAuth/client-managed auth may still expose Corbis tools.
+If no runtime OAuth session is available yet, setup still completes and the preflight in §1.3 records `available: null` so agents know OAuth/client-managed auth may still expose Corbis tools.
 
 ### 1.3 Preflight probe
 
 New utility: `code/utils/corbis/preflight.py`. Runs **once per launch/resume**, before the pipeline-state branch.
 
-Placement in `templates/runtime/claude/session.md`: today the data-inventory block runs only when `status == "not_started"`. Preflight must run on every session start (including resumes) so a freshly authenticated OAuth session, rotated personal key, or now-available Corbis is picked up. Insert preflight as its own step at the very top of session start, **before** reading `pipeline_state.json` and **outside** the data-inventory `not_started` branch. Codex and Gemini assemble this same session block plus runtime-specific discipline guidance.
+Placement in `templates/runtime/claude/session.md`: today the data-inventory block runs only when `status == "not_started"`. Preflight must run on every session start (including resumes) so agents start from a fresh Corbis status marker. Insert preflight as its own step at the very top of session start, **before** reading `pipeline_state.json` and **outside** the data-inventory `not_started` branch. Codex and Gemini assemble this same session block plus runtime-specific discipline guidance.
 
 Behavior:
-1. Read optional `CORBIS_MCP_API_KEY` from the process environment, then `.env` (fall back to legacy `CORBIS_API_KEY` only for backward compatibility).
-2. If empty → write `process_log/corbis_status.json` with `{"available": null, "auth_mode": "client_managed_oauth", ...}` and a default, unverified capability map. Exit 0.
-3. If present → connect to the MCP server using bearer-token auth, call MCP `tools/list`, record returned tool names, then map them to capabilities.
-4. Write `process_log/corbis_status.json` with **both** the raw tool list and a capability mapping:
+1. Write `process_log/corbis_status.json` with `{"available": null, "auth_mode": "client_managed_oauth", ...}` and a default, unverified capability map. Exit 0.
+2. The standalone Python preflight never calls Corbis directly; OAuth state lives inside the runtime MCP client.
+3. Status shape:
    ```json
    {
-     "available": true,
-     "auth_mode": "personal_mcp_key",
-     "tools": ["search_papers", "get_paper_details_batch", "top_cited_articles", "format_citation", "export_citations", "find_academic_identity"],
+     "available": null,
+     "auth_mode": "client_managed_oauth",
+     "tools": [],
      "capabilities": {
        "search":          "search_papers",
        "batch_fetch":     "get_paper_details_batch",
        "top_cited":       "top_cited_articles",
-       "synthesized_review": null,
+       "synthesized_review": "literature_search",
        "format_citation": "format_citation",
        "bib_export":      "export_citations",
        "author_identity": "find_academic_identity"
      },
-     "capability_source": "tools_list",
+     "capability_source": "default_unverified",
      "checked_at": "2026-05-01T..."
    }
    ```
-   Each capability resolves to a tool name from the discovered list, or `null` if not exposed at this tier (e.g., `synthesized_review` → `literature_search`, Tier-2 only). Agents resolve by capability and gracefully skip when the capability is `null`.
-5. On any connection or auth failure → write `{"available": false, "reason": "<short message>"}`. Exit 0 (never block the pipeline).
+   Agents resolve by capability and gracefully skip or fall back when the runtime does not expose the corresponding tool.
 
-Cache TTL: regenerated every session start. One MCP call; cost is negligible.
+Cache TTL: regenerated every session start. No MCP call; zero credit cost.
 
 Agents read `process_log/corbis_status.json` directly. **`pipeline_state.json` is not modified by this work** — keeping its shape stable matches Phase 1's "out of scope" list and avoids coupling Corbis availability to pipeline progress state.
 
@@ -164,15 +161,15 @@ Body sections:
 
 #### `templates/agent_bodies/shared/literature-scout.md` (Stage 0)
 
-- Discovery: if `corbis_available`, run a Corbis search/top-cited pass **in parallel with** the OpenAlex pass and the existing WebSearch pass. Results merge into the literature map. Corbis is not gating.
-- Enrichment: if `corbis_available` and the batch-fetch tool is in the tool list, batch-fetch full text on top candidates; else fall back to per-paper WebFetch on journal/NBER pages (existing path).
+- Discovery: run a Corbis search/top-cited pass **in parallel with** the OpenAlex pass and the existing WebSearch pass when the runtime exposes Corbis tools. Results merge into the literature map. Corbis is not gating.
+- Enrichment: if the runtime exposes the batch-fetch tool, batch-fetch full text on top candidates; else fall back to per-paper WebFetch on journal/NBER pages (existing path).
 - Forward/backward citations: OpenAlex CLI only.
 - Output unchanged: `output/stage0/literature_map_broad.md`.
 
 #### `templates/agent_bodies/shared/novelty-checker.md` (Gates 1b, 3)
 
 - **Mandatory dual pass.** Both Corbis and OpenAlex search passes run. Neither's miss or hit decides novelty alone — they are independent evidence streams that the agent's verdict synthesizes.
-- Cross-subfield mechanism search: OpenAlex CLI is primary (breadth). If `corbis_available` and the synthesized-review tool is in the tool list, run it as a complementary domain-specialized pass; merge results. Without it, run the multi-call Corbis search as the complement.
+- Cross-subfield mechanism search: OpenAlex CLI is primary (breadth). If the runtime exposes the synthesized-review tool, run it as a complementary domain-specialized pass; merge results. Without it, run the multi-call Corbis search as the complement.
 - Forward citations of seminal candidates: OpenAlex CLI.
 - Output unchanged.
 
@@ -195,7 +192,7 @@ Trigger: Phase 1 deployed; smoke tests passing with real Corbis OAuth or persona
 
 Note: `gap-scout` runs at **both** Stage 0 (after the broad scan, for gap validation) and Stage 3 (parallel implication checks during theory derivation), per its current metadata.
 
-- Adjacent literatures: if `corbis_available`, run Corbis as a parallel pass alongside OpenAlex + WebSearch. Merge.
+- Adjacent literatures: run Corbis as a parallel pass alongside OpenAlex + WebSearch when the runtime exposes Corbis tools. Merge.
 - Closest-competitor identification: Corbis search ranked by citation count; OpenAlex remains primary for `cites <DOI>` traversal.
 - Output unchanged.
 
@@ -203,7 +200,7 @@ Metadata: add `"corbis"` to `gap-scout`'s skills list.
 
 ### 2.2 `bib-verifier` (Stages 5, 8, 9)
 
-- New optional first enrichment pass: when Corbis is available or client-managed and both `search` and `batch_fetch` capabilities are present, search each bib entry by title/authors, validate candidate hits by title similarity + author overlap + year ±1 + DOI agreement when present, then batch-fetch the exact `id` returned by Corbis for validated hits. Direct DOI input to `batch_fetch` is not reliable.
+- New optional first enrichment pass: when the runtime exposes both `search` and `batch_fetch` capabilities, search each bib entry by title/authors, validate candidate hits by title similarity + author overlap + year ±1 + DOI agreement when present, then batch-fetch the exact `id` returned by Corbis for validated hits. Direct DOI input to `batch_fetch` is not reliable.
 - Deterministic verification still runs `verify_bib.sh` against OpenAlex.
 - `output/bib_verification.md` format **does not change**. Corbis hits provide additional metadata internally but the on-disk report is byte-for-byte the same shape orchestrator consumers expect.
 
@@ -246,9 +243,9 @@ Variant substitution (`{{DOMAIN_AREAS}}`, `{{SCORING}}`, etc.) extends to walk `
 2. `./setup.sh test_output/macro --variant macro --local` — same.
 3. `./setup.sh test_output/finance_manual --variant finance --manual --local` — manual mode assembles cleanly; the (deferred) Phase-3 skills are not present yet; runtime catalog reflects this.
 4. `./setup.sh test_output/finance_emp --variant finance --ext empirical --local` and `--ext theory_llm` — both still work.
-5. **Secret-leak test**: with a real personal MCP key populated in `.env`, run `setup.sh`; assert the literal key value does not appear in any file matched by `git ls-files` in the deployed project tree, and no tracked config contains a non-empty `apikey=` URL parameter.
-6. **Without a personal key set**: launch the deployed project; preflight writes `corbis_status.json` with `available: null`, `auth_mode: client_managed_oauth`, and default unverified capabilities. If the MCP client has authenticated through OAuth, Corbis tools can still run; if not, agents fall back cleanly to OpenAlex + WebSearch.
-7. **With OAuth or a real key set**: for each runtime, smoke-test independently — client connects to Corbis MCP, `tools/list` or the runtime-visible tool list returns Corbis tools, and one search call returns results. Do this **before** trusting any agent prompt change in production. For runtimes where setup deferred to manual instructions, follow those instructions and verify the same smoke test passes.
+5. **Secret-leak test**: run `setup.sh`; assert no generated Corbis config contains a credential-bearing URL parameter or literal credential.
+6. Launch the deployed project; preflight writes `corbis_status.json` with `available: null`, `auth_mode: client_managed_oauth`, and default unverified capabilities. If the MCP client has authenticated through OAuth, Corbis tools can still run; if not, agents fall back cleanly to OpenAlex + WebSearch.
+7. **With OAuth**: for each runtime, smoke-test independently — client connects to Corbis MCP, `tools/list` or the runtime-visible tool list returns Corbis tools, and one search call returns results. Do this **before** trusting any agent prompt change in production. For runtimes where setup deferred to manual instructions, follow those instructions and verify the same smoke test passes.
 8. Pipeline agents loading the `corbis` skill in Phase 1 are exactly `literature-scout` and `novelty-checker` — no scope creep.
 9. After session-start preflight runs on a resumed pipeline (`status == "running"`), `corbis_status.json` is regenerated (verified by checking `checked_at` timestamp updates).
 10. `pipeline_state.json` schema is byte-for-byte unchanged from before this work (Phase 1 does not touch it).

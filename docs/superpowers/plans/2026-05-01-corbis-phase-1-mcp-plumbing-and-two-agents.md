@@ -1,6 +1,6 @@
 # Corbis Phase 1 — MCP Plumbing + Preflight + Two Agent Updates
 
-> **Auth-model correction:** This implementation plan predates the OAuth-first correction. Treat any `CORBIS_API_KEY`, `?apikey=`, or "no key means unavailable" instructions below as historical. Current runtime behavior is defined by `setup.sh`, `templates/utils/corbis/preflight.py`, and the design spec: OAuth is the default; `CORBIS_MCP_API_KEY` is optional for headless clients; no personal key records `available: null` rather than disabling Corbis.
+> **Auth-model correction:** This implementation plan predates the OAuth-only correction. Treat any project env credential, `?apikey=`, or "no key means unavailable" instructions below as historical. Current runtime behavior is defined by `setup.sh`, `templates/utils/corbis/preflight.py`, and the design spec: OAuth through the MCP client is the supported auth path; preflight records `available: null` rather than disabling Corbis.
 
 > **Live smoke-test correction:** Corbis `id` fields are endpoint-specific. `search_papers` may return OpenAlex-style `W...` IDs, while `top_cited_articles` may return Corbis UUIDs; both forms can be valid `batch_fetch` inputs when returned by Corbis. Direct DOI input to `batch_fetch` is not reliable. Treat any UUID-only or OpenAlex-ID-rejection wording below as historical; current agent behavior is "search, validate, then batch-fetch the exact Corbis result `id`."
 
