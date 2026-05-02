@@ -56,7 +56,7 @@ For forward/backward citation traversal (`cites`, `refs`), Corbis does not expos
 
 **Novelty hunt (Gates 1b, 3)**: run BOTH Corbis (`search` + `synthesized_review` if available) AND OpenAlex (whole-corpus `search --sort cited` + `cites <DOI>` traversal). Treat the two passes as independent evidence streams. The novelty verdict synthesizes both — neither alone decides.
 
-**Bib enrichment**: when working with paper IDs returned from Corbis search, prefer `bib_export` over `format_citation` (single batch call vs. one-by-one). Fall back to OpenAlex DOI lookup for IDs Corbis doesn't recognize.
+**Bib enrichment**: when working with paper IDs returned from Corbis search, prefer `bib_export` over `format_citation` (single batch call vs. one-by-one). For `batch_fetch`, pass the exact `id` value returned by Corbis search/top-cited results; do not substitute a DOI. Fall back to OpenAlex DOI lookup for IDs Corbis doesn't recognize.
 
 ## Rate limits and credit budget
 
@@ -69,6 +69,6 @@ Per pipeline run, expect ~10–15 credits at Stage 0 (lit-scout) and ~10 credits
 
 ## Caveats
 
-- Corbis paper IDs are UUIDs, not DOIs or OpenAlex IDs. When merging Corbis results with OpenAlex results, deduplicate by DOI (both backends return DOI on most papers).
+- Corbis `id` fields are endpoint-specific: `search_papers` may return OpenAlex-style `W...` IDs, while `top_cited_articles` may return Corbis UUIDs. Both forms can be valid Corbis inputs when they came from Corbis results. Direct DOI input to `batch_fetch` is not reliable. When merging Corbis results with OpenAlex results, deduplicate by DOI (both backends return DOI on most papers).
 - Online-first vs print year: top finance/econ journals' year may differ between Corbis and OpenAlex by ±1 (online-first vs print issue). Treat ±1 year as identity when deduplicating.
 - Coverage gap: anything outside finance/economics (CS papers, hard sciences, pre-2000 working papers, most NBER pre-2018) likely isn't in Corbis. The bibliography verifier handles these via OpenAlex fallback (see Phase 2).

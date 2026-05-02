@@ -20,6 +20,7 @@ Add the Corbis MCP server as a domain-specialized literature-search layer alongs
 4. **bib_verify is stable infrastructure.** `code/utils/bib_verify/verify_bib.sh` and the `output/bib_verification.md` format do not change. Corbis becomes an optional first enrichment pass, never a replacement for deterministic DOI/title checks.
 5. **Audit before rewrite.** `polish-bibliography` audits citation claims; it never wholesale-regenerates BibTeX from Corbis IDs without explicit triager approval per citation.
 6. **Secrets stay out of tracked files.** No literal Corbis personal MCP key appears in any file under the project tree after `setup.sh` (do not assume a key prefix; check the actual configured value). OAuth is preferred. If a runtime client cannot use OAuth and cannot read env at MCP-server-launch time, the project file holding the key is added to `.gitignore` and we prefer Bearer/header-based auth where the client supports it.
+7. **Corbis result IDs are opaque.** Live smoke tests showed endpoint-specific IDs: `search_papers` may return OpenAlex-style `W...` IDs, while `top_cited_articles` may return Corbis UUIDs. Agents pass the exact `id` returned by Corbis into batch/detail/export calls; they do not substitute DOI input, which is not reliable for `batch_fetch`.
 
 ## Architecture
 
@@ -188,7 +189,7 @@ Metadata changes (`templates/agent_metadata/claude_shared_agents.json`): add `"c
 
 ## Phase 2 — extend after Phase 1 is reliable
 
-Trigger: Phase 1 deployed; smoke tests passing on a real Corbis key across all three runtimes; no flaky-discovery issues observed in real pipeline runs.
+Trigger: Phase 1 deployed; smoke tests passing with real Corbis OAuth or personal MCP-key auth across all three runtimes; no flaky-discovery issues observed in real pipeline runs.
 
 ### 2.1 `gap-scout` (Stage 0 + Stage 3)
 
@@ -202,7 +203,7 @@ Metadata: add `"corbis"` to `gap-scout`'s skills list.
 
 ### 2.2 `bib-verifier` (Stages 5, 8, 9)
 
-- New optional first enrichment pass: when `corbis_available` and the batch-fetch tool is in the tool list, run it on the bib as an enrichment lookup that **augments** existing report fields with full-text/abstract data from Corbis hits.
+- New optional first enrichment pass: when Corbis is available or client-managed and both `search` and `batch_fetch` capabilities are present, search each bib entry by title/authors, validate candidate hits by title similarity + author overlap + year ±1 + DOI agreement when present, then batch-fetch the exact `id` returned by Corbis for validated hits. Direct DOI input to `batch_fetch` is not reliable.
 - Deterministic verification still runs `verify_bib.sh` against OpenAlex.
 - `output/bib_verification.md` format **does not change**. Corbis hits provide additional metadata internally but the on-disk report is byte-for-byte the same shape orchestrator consumers expect.
 
@@ -210,7 +211,7 @@ Metadata: add `"corbis"` to `bib-verifier`'s skills list (alongside existing `bi
 
 ### 2.3 `polish-bibliography`
 
-**Audit-only.** Uses Corbis to surface possible cleanups (better-formed BibTeX entries from `format_citation`, identifier resolution from `find_academic_identity`) but writes proposals to a **new** file `output/bib_polish_proposals.md` for triager review. Never rewrites the live `.bib` automatically. The triager (or the user in manual review) approves changes per-citation.
+**Audit-only.** Uses Corbis to surface possible cleanups (better-formed BibTeX entries from `format_citation`, identifier resolution from `find_academic_identity`) but writes proposals to the existing `output/polish_bibliography_r{N}.md` path for triager review. Never rewrites the live `.bib` automatically. The triager (or the user in manual review) approves changes per-citation.
 
 Metadata: add `"corbis"` to `polish-bibliography`'s skills list.
 
@@ -255,7 +256,7 @@ Variant substitution (`{{DOMAIN_AREAS}}`, `{{SCORING}}`, etc.) extends to walk `
 ### Phase 2
 
 11. `bib-verifier` test: insert a CS-paper citation Corbis doesn't index into a test bib; verify the agent resolves it via OpenAlex and the report at `output/bib_verification.md` matches the existing format byte-for-byte (no new fields, no reordering).
-12. `polish-bibliography` test: assert the agent writes `output/bib_polish_proposals.md` and does not modify the live `.bib`.
+12. `polish-bibliography` test: assert the agent writes the existing `output/polish_bibliography_r{N}.md` report path and does not modify the live `.bib`.
 
 ### Phase 3
 

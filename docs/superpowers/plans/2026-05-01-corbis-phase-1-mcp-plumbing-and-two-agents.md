@@ -2,6 +2,8 @@
 
 > **Auth-model correction:** This implementation plan predates the OAuth-first correction. Treat any `CORBIS_API_KEY`, `?apikey=`, or "no key means unavailable" instructions below as historical. Current runtime behavior is defined by `setup.sh`, `templates/utils/corbis/preflight.py`, and the design spec: OAuth is the default; `CORBIS_MCP_API_KEY` is optional for headless clients; no personal key records `available: null` rather than disabling Corbis.
 
+> **Live smoke-test correction:** Corbis `id` fields are endpoint-specific. `search_papers` may return OpenAlex-style `W...` IDs, while `top_cited_articles` may return Corbis UUIDs; both forms can be valid `batch_fetch` inputs when returned by Corbis. Direct DOI input to `batch_fetch` is not reliable. Treat any UUID-only or OpenAlex-ID-rejection wording below as historical; current agent behavior is "search, validate, then batch-fetch the exact Corbis result `id`."
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add the Corbis MCP server to the pipeline as a domain-specialized literature layer alongside (not in front of) OpenAlex and WebSearch. Phase 1 wires per-runtime MCP config, a preflight probe that runs once per session, the pipeline `corbis` skill, and updates to two agents only: `literature-scout` and `novelty-checker`. `bib-verifier`, `polish-bibliography`, `gap-scout`, and the manual-mode workflow skills are out of scope (Phase 2 / Phase 3).
