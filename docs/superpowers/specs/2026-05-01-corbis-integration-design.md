@@ -15,11 +15,11 @@ Add the Corbis MCP server as a domain-specialized literature-search layer alongs
 ## Architectural principles (overrides any tactical choice that conflicts)
 
 1. **Novelty needs breadth, not precision.** Corbis (~250K curated finance/econ papers) cannot be the sole arbiter of novelty. OpenAlex (~250M works) is mandatory at Gates 1b and 3 for cross-subfield mechanism searches and forward/backward citation traversal. Both passes run; neither alone decides.
-2. **Detect Corbis once per session, not per call.** A preflight probe records `corbis_available: true|false` and a capability-to-tool mapping. Agents read this; they do not infer availability from 403s mid-run.
+2. **Detect Corbis once per session, not per call.** A preflight probe records `available: true|false|null` and a capability-to-tool mapping. `true` means a personal MCP key verified tools, `false` means a real probe failed, and `null` means auth is client-managed/OAuth and cannot be inspected by the standalone Python probe. Agents read this; they do not infer availability from 403s mid-run.
 3. **Tool set is not hard-coded.** Corbis docs explicitly say the tool list depends on account/key tier. Agents reference tools by capability ("the search tool," "the batch-fetch tool") and resolve to actual names from the preflight's capability map.
 4. **bib_verify is stable infrastructure.** `code/utils/bib_verify/verify_bib.sh` and the `output/bib_verification.md` format do not change. Corbis becomes an optional first enrichment pass, never a replacement for deterministic DOI/title checks.
 5. **Audit before rewrite.** `polish-bibliography` audits citation claims; it never wholesale-regenerates BibTeX from Corbis IDs without explicit triager approval per citation.
-6. **Secrets stay out of tracked files.** No literal Corbis API key appears in any file under the project tree after `setup.sh` (do not assume a key prefix; check the actual configured value). Auth uses environment variables; if a runtime client cannot read env at MCP-server-launch time, the project file holding the key is added to `.gitignore` and we prefer Bearer/header-based auth where the client supports it.
+6. **Secrets stay out of tracked files.** No literal Corbis personal MCP key appears in any file under the project tree after `setup.sh` (do not assume a key prefix; check the actual configured value). OAuth is preferred. If a runtime client cannot use OAuth and cannot read env at MCP-server-launch time, the project file holding the key is added to `.gitignore` and we prefer Bearer/header-based auth where the client supports it.
 
 ## Architecture
 
@@ -97,35 +97,34 @@ Goal: prove Corbis works reliably across all three runtimes before broadening su
 
 `setup.sh` writes per-runtime MCP config. **The implementation plan must verify each path against current docs and a real test before committing the runtime config it writes.**
 
-- **Claude**: project-local `.mcp.json`. Confirmed working pattern.
-- **Codex**: Per the OpenAI Codex MCP docs (https://developers.openai.com/codex/mcp), Codex supports both user-global `~/.codex/config.toml` and project-scoped `.codex/config.toml` (subject to a project-trust check); HTTP-MCP fields include `url`, `bearer_token_env_var`, `env_http_headers`. The implementation plan should:
-  - Default to **project-scoped `.codex/config.toml`**, gated on the trust check. Fall back to instructing the user to append a documented block to `~/.codex/config.toml` themselves only if the trust path is unavailable for this project.
-  - Default auth method to **`bearer_token_env_var = "CORBIS_API_KEY"`** rather than `url = "...?apikey=${CORBIS_API_KEY}"` if Corbis MCP accepts Bearer auth. Test this against the live server during implementation. If Bearer is unsupported, fall back to URL interpolation only after confirming Codex expands `${CORBIS_API_KEY}` from the expected source.
-- **Gemini**: confirm the Gemini CLI's MCP-config location and env-expansion behavior during implementation. Same auth-method preference: header/env over URL interpolation.
+- **Claude**: project-local `.mcp.json` with the universal endpoint only (`https://www.corbis.ai/api/mcp/universal`). Authentication is OAuth-first; Claude Code opens the browser auth flow when needed.
+- **Codex**: Codex support varies by installed build, so setup emits manual instructions rather than writing unverified config. Preferred path: add the remote HTTP MCP URL and run Codex's MCP login/OAuth command. For headless runs, use `CORBIS_MCP_API_KEY` with bearer-token env-var support when available; URL `?apikey=` expansion is a fallback only.
+- **Gemini**: setup emits manual instructions until the installed Gemini MCP config shape is verified. Same auth preference: OAuth first, then personal MCP key through private env/header config.
 
 ### 1.2 Secret handling
 
-- The deployed project's `.env` may not exist yet (current `setup.sh:717` only copies one if the template repo has it). Phase 1 explicitly `touch "$P/.env"` before any append, then appends `CORBIS_API_KEY=` if not already present. `.env` is in the deployed project's `.gitignore`.
-- For each runtime, **test** that the configured auth method actually picks the key up at MCP-server-launch time before declaring the integration done.
+- The deployed project's `.env` may not exist yet. Setup explicitly `touch "$P/.env"` and may add commented notes for optional `CORBIS_MCP_API_KEY`, but Corbis does **not** require a project env key for OAuth.
+- For each runtime, **test** that OAuth login or the configured personal-key method actually reaches the MCP server before declaring the integration done.
 - If a runtime requires the literal key in a config file (no env-var support), add that file to the deployed project's `.gitignore` and document the constraint in `setup.sh` output.
-- **Secret-leak acceptance test** (do not assume key prefix): with a real `CORBIS_API_KEY` populated, run `setup.sh`, then assert (a) the literal key value does not appear in any file matched by `git ls-files` in the deployed project tree, and (b) no tracked config contains a non-empty `apikey=<value>` URL parameter or any other literal credential. The test reads the key from `.env` and greps for that exact string.
+- **Secret-leak acceptance test** (do not assume key prefix): with a real `CORBIS_MCP_API_KEY` populated, run `setup.sh`, then assert (a) the literal key value does not appear in any file matched by `git ls-files` in the deployed project tree, and (b) no tracked config contains a non-empty `apikey=<value>` URL parameter or any other literal credential. The test reads the key from `.env` and greps for that exact string.
 
-`CORBIS_API_KEY` is **soft-required**: setup completes whether or not it's set; if absent, setup prints a warning and the preflight in §1.3 records `available: false`.
+`CORBIS_MCP_API_KEY` is optional. If absent from both the process environment and `.env`, setup completes without warning and the preflight in §1.3 records `available: null` so agents know OAuth/client-managed auth may still expose Corbis tools.
 
 ### 1.3 Preflight probe
 
 New utility: `code/utils/corbis/preflight.py`. Runs **once per launch/resume**, before the pipeline-state branch.
 
-Placement in `templates/runtime/claude/session.md`: today the data-inventory block runs only when `status == "not_started"`. Preflight must run on every session start (including resumes) so a freshly-rotated key or a now-available Corbis is picked up. Insert preflight as its own step at the very top of session start, **before** reading `pipeline_state.json` and **outside** the data-inventory `not_started` branch. Equivalent insertions in `templates/runtime/codex/session.md` and `templates/runtime/gemini/session.md`.
+Placement in `templates/runtime/claude/session.md`: today the data-inventory block runs only when `status == "not_started"`. Preflight must run on every session start (including resumes) so a freshly authenticated OAuth session, rotated personal key, or now-available Corbis is picked up. Insert preflight as its own step at the very top of session start, **before** reading `pipeline_state.json` and **outside** the data-inventory `not_started` branch. Codex and Gemini assemble this same session block plus runtime-specific discipline guidance.
 
 Behavior:
-1. Read `CORBIS_API_KEY` from `.env`.
-2. If empty → write `process_log/corbis_status.json` with `{"available": false, "reason": "no key"}`. Exit 0.
-3. If present → connect to the MCP server, call MCP `tools/list`, record returned tool names, then map them to capabilities.
+1. Read optional `CORBIS_MCP_API_KEY` from the process environment, then `.env` (fall back to legacy `CORBIS_API_KEY` only for backward compatibility).
+2. If empty → write `process_log/corbis_status.json` with `{"available": null, "auth_mode": "client_managed_oauth", ...}` and a default, unverified capability map. Exit 0.
+3. If present → connect to the MCP server using bearer-token auth, call MCP `tools/list`, record returned tool names, then map them to capabilities.
 4. Write `process_log/corbis_status.json` with **both** the raw tool list and a capability mapping:
    ```json
    {
      "available": true,
+     "auth_mode": "personal_mcp_key",
      "tools": ["search_papers", "get_paper_details_batch", "top_cited_articles", "format_citation", "export_citations", "find_academic_identity"],
      "capabilities": {
        "search":          "search_papers",
@@ -136,6 +135,7 @@ Behavior:
        "bib_export":      "export_citations",
        "author_identity": "find_academic_identity"
      },
+     "capability_source": "tools_list",
      "checked_at": "2026-05-01T..."
    }
    ```
@@ -241,13 +241,13 @@ Variant substitution (`{{DOMAIN_AREAS}}`, `{{SCORING}}`, etc.) extends to walk `
 
 ### Phase 1
 
-1. `./setup.sh test_output/finance --variant finance --local` — assembles cleanly, no unresolved `{{...}}`, `.env` exists and contains a `CORBIS_API_KEY=` line. MCP config is written for **each runtime whose integration path was verified during implementation** (per §1.1 — at minimum Claude; Codex and Gemini are written iff project-local config + chosen auth method were confirmed working). Runtimes whose path was not verified produce documented manual-setup instructions in `setup.sh` output instead of an unverified config file.
+1. `./setup.sh test_output/finance --variant finance --local` — assembles cleanly, no unresolved `{{...}}`, `.env` exists, and `.mcp.json` points Claude at the Corbis universal endpoint with no key in the URL. Runtimes whose path was not verified produce documented manual-setup instructions in `setup.sh` output instead of an unverified config file.
 2. `./setup.sh test_output/macro --variant macro --local` — same.
 3. `./setup.sh test_output/finance_manual --variant finance --manual --local` — manual mode assembles cleanly; the (deferred) Phase-3 skills are not present yet; runtime catalog reflects this.
 4. `./setup.sh test_output/finance_emp --variant finance --ext empirical --local` and `--ext theory_llm` — both still work.
-5. **Secret-leak test**: with a real key populated in `.env`, run `setup.sh`; assert the literal key value does not appear in any file matched by `git ls-files` in the deployed project tree, and no tracked config contains a non-empty `apikey=` URL parameter.
-6. **Without a key set**: launch the deployed project; preflight writes `corbis_status.json` with `available: false`; pipeline runs to completion using OpenAlex + WebSearch only with no agent crashes.
-7. **With a real key set**: for each runtime where MCP config was written automatically, smoke-test independently — client connects to Corbis MCP, `tools/list` returns a non-empty list, one search call returns results. Do this **before** trusting any agent prompt change in production. For runtimes where setup deferred to manual instructions, follow those instructions and verify the same smoke test passes.
+5. **Secret-leak test**: with a real personal MCP key populated in `.env`, run `setup.sh`; assert the literal key value does not appear in any file matched by `git ls-files` in the deployed project tree, and no tracked config contains a non-empty `apikey=` URL parameter.
+6. **Without a personal key set**: launch the deployed project; preflight writes `corbis_status.json` with `available: null`, `auth_mode: client_managed_oauth`, and default unverified capabilities. If the MCP client has authenticated through OAuth, Corbis tools can still run; if not, agents fall back cleanly to OpenAlex + WebSearch.
+7. **With OAuth or a real key set**: for each runtime, smoke-test independently — client connects to Corbis MCP, `tools/list` or the runtime-visible tool list returns Corbis tools, and one search call returns results. Do this **before** trusting any agent prompt change in production. For runtimes where setup deferred to manual instructions, follow those instructions and verify the same smoke test passes.
 8. Pipeline agents loading the `corbis` skill in Phase 1 are exactly `literature-scout` and `novelty-checker` — no scope creep.
 9. After session-start preflight runs on a resumed pipeline (`status == "running"`), `corbis_status.json` is regenerated (verified by checking `checked_at` timestamp updates).
 10. `pipeline_state.json` schema is byte-for-byte unchanged from before this work (Phase 1 does not touch it).
