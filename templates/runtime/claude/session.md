@@ -11,6 +11,9 @@
    - If `status` is `"not_started"`: run data inventory (below), set to `"running"`, begin Stage 0
    - If `status` is `"running"`: read `current_stage` and continue from there
    - If `status` is `"complete"`: report that the pipeline is done
+   - If `status` starts with `"halted_"`: the pipeline was halted by a prior session pending operator intervention. Report the halt reason (the suffix names it: `halted_wrds_unreachable`, `halted_no_identification_design`, etc.) and stop — do NOT attempt to resume or repair. Recovery is operator-driven, and the right path depends on whether the halt is transient or structural:
+     - **Transient halts** (the underlying condition can be fixed in place without a redeployment) — e.g., `halted_wrds_unreachable` (restart the WRDS server, then resume). Operator fixes the condition, flips `status` back to `"running"`, and the next session continues from the existing `current_stage`.
+     - **Structural halts** (the deployment configuration itself is wrong; in-place recovery would just re-trigger the halt) — e.g., `halted_no_identification_design` under `--mode empirical-first` (the question is irreducibly non-causal; the deployment must be converted to theory-first). Operator reruns `update.sh --no-mode` (or with corrected flags) to refresh the templates, then **also resets `current_stage`** to a value the new deployment understands (typically `"stage_1"` to re-enter idea selection, or `"stage_2"` if the selected idea is still valid in the new configuration — leaving `"stage_1_identification_design"` in place would point the resume logic at a stage doc that no longer exists in the converted deployment), and finally flips `status` back to `"running"`. Do not flip `status` without resetting `current_stage` first when the halt is structural.
 3. No human confirmation needed — just run
 
 ### Data inventory (runs once at pipeline start)
@@ -24,6 +27,18 @@ Before Stage 0, check what data sources are available. This prevents bad assumpt
 
 **CRITICAL:** All downstream agents must read `output/data_inventory.md` when making decisions about empirical feasibility. The idea-generator and idea-reviewer must know what data is available so they design ideas that USE available data, not work around imagined limitations. Never assume a data source is unavailable without checking the inventory.
 
+The session-start data inventory is *not* sufficient for long-running pipelines: a multi-hour Stage 2 iteration can outlive the WRDS session it depends on. `docs/stage_3a_empirical.md` ("Preflight: data-source liveness") and `docs/stage_puzzle_triage.md` (FIX-EMPIRICS branch) document a per-launch `wrds_ping()` check the orchestrator must run before each `empiricist` invocation. The session-start inventory establishes the baseline; the per-launch preflight catches drops.
+
 ### Agent launch and monitoring
 
 Subagents can hang indefinitely. Launch web-dependent agents (`literature-scout`, `novelty-checker`) in the background. Check their output file every 5 minutes — if empty or not growing after a few checks, re-launch with the same prompt.
+
+### Hourly self-check (stall guard + pace reminder)
+
+Right after the data inventory completes and before Stage 0 launches, set up an hourly self-loop using the Claude Code `/loop` skill.
+
+Invoke once at session start or if not set on a resume session:
+
+```
+/loop 1h Stall check: has the latest history timestamp advanced since the previous check? Are any subagent output files empty or not growing? If a subagent is hung, kill it and re-launch with the same prompt, or escalate the relevant attempt counter per the stage doc. Pace reminder: this paper would normally take months of human work, and the quality of the final manuscript is what matters — not throughput. Honest scope, careful derivations, and slow iteration produce better papers than fast brittle drafts. Do not advance a gate to save time; advance only when the gate's criteria are met.
+```

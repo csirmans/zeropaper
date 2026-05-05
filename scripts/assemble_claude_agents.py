@@ -16,7 +16,9 @@ def format_value(value):
         return "true" if value else "false"
     if isinstance(value, list):
         return "[" + ", ".join(str(v) for v in value) + "]"
-    return str(value)
+    s = str(value)
+    escaped = s.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def render_agent(metadata, body):
@@ -34,13 +36,20 @@ def render_agent(metadata, body):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--metadata", required=True)
-    parser.add_argument("--bodies-dir", required=True)
+    parser.add_argument("--bodies-dir", action="append", default=[], required=True,
+                        help="Directory for variant/extension bodies ({id}.md). "
+                             "Repeatable; checked in order, first match wins. "
+                             "Pass a --mode overlay dir before the base bodies dir to "
+                             "shadow shared-agent bodies while inheriting the rest.")
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--shared-bodies-dir", default=None,
+    parser.add_argument("--shared-bodies-dir", action="append", default=[],
                         help="Directory for shared core bodies ({id}-core.md). "
-                             "Checked before --bodies-dir for each agent.")
-    parser.add_argument("--vocab", default=None,
-                        help="Optional variant vocab JSON; substitutes {{KEY}} in bodies.")
+                             "Repeatable; checked in order, first match wins. "
+                             "Pass a --mode overlay dir before the base shared dir to "
+                             "shadow variant-agent shared bodies while inheriting the rest.")
+    parser.add_argument("--vocab", action="append", default=[],
+                        help="Variant vocab JSON; substitutes {{KEY}} in bodies. "
+                             "Repeatable; later overlays override earlier on duplicate keys.")
     parser.add_argument("--model-override", default=None,
                         help="Force all agents to this model (e.g. sonnet)")
     args = parser.parse_args()

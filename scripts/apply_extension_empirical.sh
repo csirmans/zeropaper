@@ -1,6 +1,17 @@
 #!/bin/bash
 set -e
 
+# Mode threading: positional $10 = MODE_BODIES_OVERLAY, $11 = MODE_VOCAB_OVERLAY,
+# $12 = base variant vocab path. The variant vocab supplies default values for
+# placeholders the extension bodies use (e.g. {{EMPIRICS_AUDITOR_MODE_BLOCK}}
+# is empty in the base vocab and populated only by the empirical-first
+# overlay). The base vocab MUST be passed even outside mode-empirical-first
+# deploys, because the extension bodies now reference shared placeholders.
+# Phase 6 added the EMPIRICS_AUDITOR_MODE_BLOCK placeholder to empirics-auditor;
+# future mode-conditional content in extension agents follows the same
+# pattern (placeholder in body + default in base vocab + override in mode
+# overlay).
+
 TEMPLATE_ROOT="$1"
 PROJECT_ROOT="$2"
 AGENTS_OUT="$3"
@@ -13,6 +24,21 @@ MODEL_OVERRIDE_ARG=()
 if [ -n "$9" ]; then
     MODEL_OVERRIDE_ARG=(--model-override "$9")
 fi
+EXT_MODE_BODIES_OVERLAY="${10}"
+EXT_MODE_VOCAB_OVERLAY="${11}"
+EXT_BASE_VOCAB="${12}"
+
+# Build vocab args: base variant vocab first, then mode overlay (last-write-wins).
+EXT_VOCAB_ARGS=()
+[ -n "$EXT_BASE_VOCAB" ] && [ -f "$EXT_BASE_VOCAB" ] && EXT_VOCAB_ARGS+=(--vocab "$EXT_BASE_VOCAB")
+[ -n "$EXT_MODE_VOCAB_OVERLAY" ] && [ -f "$EXT_MODE_VOCAB_OVERLAY" ] && EXT_VOCAB_ARGS+=(--vocab "$EXT_MODE_VOCAB_OVERLAY")
+
+# Build shared-bodies args: mode overlay first (first-match-wins for any
+# {id}-core.md override). This dir does not currently host extension-agent
+# overrides, but threading it now means a future mode override of an
+# extension agent's body works without further apply_extension changes.
+EXT_SHARED_ARGS=()
+[ -n "$EXT_MODE_BODIES_OVERLAY" ] && [ -d "$EXT_MODE_BODIES_OVERLAY" ] && EXT_SHARED_ARGS+=(--shared-bodies-dir "$EXT_MODE_BODIES_OVERLAY")
 
 # SKILL_MODE is inherited from the calling setup.sh environment. Defensive
 # fallback to autonomous when this script is invoked directly (e.g., during
@@ -31,17 +57,23 @@ if [ -f "$EXT_ROOT/agent_metadata/shared_agents.json" ]; then
     python3 "$TEMPLATE_ROOT/scripts/assemble_claude_agents.py" \
         --metadata "$EXT_ROOT/agent_metadata/shared_agents.json" \
         --bodies-dir "$EXT_ROOT/agent_bodies/shared" \
+        "${EXT_SHARED_ARGS[@]}" \
+        "${EXT_VOCAB_ARGS[@]}" \
         --output-dir "$AGENTS_OUT" \
         "${MODEL_OVERRIDE_ARG[@]}"
 
     python3 "$TEMPLATE_ROOT/scripts/assemble_codex_subagents.py" \
         --metadata "$EXT_ROOT/agent_metadata/shared_agents.json" \
         --bodies-dir "$EXT_ROOT/agent_bodies/shared" \
+        "${EXT_SHARED_ARGS[@]}" \
+        "${EXT_VOCAB_ARGS[@]}" \
         --output-dir "$CODEX_AGENTS_OUT"
 
     python3 "$TEMPLATE_ROOT/scripts/assemble_gemini_agents.py" \
         --metadata "$EXT_ROOT/agent_metadata/shared_agents.json" \
         --bodies-dir "$EXT_ROOT/agent_bodies/shared" \
+        "${EXT_SHARED_ARGS[@]}" \
+        "${EXT_VOCAB_ARGS[@]}" \
         --output-dir "$GEMINI_AGENTS_OUT" \
         "${MODEL_OVERRIDE_ARG[@]}"
 fi
@@ -50,17 +82,23 @@ if [ -f "$EXT_ROOT/agent_metadata/${AGENT_DIR}_agents.json" ]; then
     python3 "$TEMPLATE_ROOT/scripts/assemble_claude_agents.py" \
         --metadata "$EXT_ROOT/agent_metadata/${AGENT_DIR}_agents.json" \
         --bodies-dir "$EXT_ROOT/agent_bodies/${AGENT_DIR}" \
+        "${EXT_SHARED_ARGS[@]}" \
+        "${EXT_VOCAB_ARGS[@]}" \
         --output-dir "$AGENTS_OUT" \
         "${MODEL_OVERRIDE_ARG[@]}"
 
     python3 "$TEMPLATE_ROOT/scripts/assemble_codex_subagents.py" \
         --metadata "$EXT_ROOT/agent_metadata/${AGENT_DIR}_agents.json" \
         --bodies-dir "$EXT_ROOT/agent_bodies/${AGENT_DIR}" \
+        "${EXT_SHARED_ARGS[@]}" \
+        "${EXT_VOCAB_ARGS[@]}" \
         --output-dir "$CODEX_AGENTS_OUT"
 
     python3 "$TEMPLATE_ROOT/scripts/assemble_gemini_agents.py" \
         --metadata "$EXT_ROOT/agent_metadata/${AGENT_DIR}_agents.json" \
         --bodies-dir "$EXT_ROOT/agent_bodies/${AGENT_DIR}" \
+        "${EXT_SHARED_ARGS[@]}" \
+        "${EXT_VOCAB_ARGS[@]}" \
         --output-dir "$GEMINI_AGENTS_OUT" \
         "${MODEL_OVERRIDE_ARG[@]}"
 else

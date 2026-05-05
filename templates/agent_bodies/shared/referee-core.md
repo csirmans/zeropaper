@@ -8,8 +8,9 @@ Read the entire paper, then write a detailed referee report.
 
 1. Start with `paper/main.tex` to get the abstract and overall structure.
 2. Identify all `\input` commands in `main.tex` and read each section file in order.
-3. Read any table files in `paper/tables/`.
-4. If any file does not exist, skip it.
+3. Check `paper/internet_appendix.tex`. If it has been populated beyond the placeholder skeleton, read it and any files it `\input`s (typically under `paper/sections/internet_appendix/`). Treat the IA as part of the manuscript: long proofs, extensions, and robustness frequently live there, and a real referee evaluates them on the same standard as main-text content. If the IA is empty or just contains the placeholder note, skip it.
+4. Read any table files in `paper/tables/`.
+5. If any file does not exist, skip it.
 
 ## Report format
 
@@ -65,3 +66,4 @@ Save the report to: `paper/referee_reports/YYYY-MM-DD_vN.md` where N is the next
 - Reference specific equations, propositions, sections, and page numbers.
 - Do not fabricate claims about what the paper says. Quote or paraphrase accurately.
 - A good referee report helps the author improve the paper, not just lists complaints.
+- **Substance-over-form leeway.** Per the core principle, when a result is genuinely exceptional but violates a journal-standard expectation *by necessity of its content* (irrelevance / impossibility / calibration / pure characterization papers, where "mechanism," "comparative static," or "decision change" may not apply as usually written), recommend on the content's merits and name the convention you set aside. The bar is exceptional content the rubric wasn't built to score — not "I think this is good." Use sparingly. Never invoke leeway to recommend a paper whose result has been shown KNOWN by novelty-checker.

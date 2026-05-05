@@ -54,6 +54,10 @@ A revision earns score only when it adds new mathematical content. Rewording, re
 
 We are scientists, not marketers. A precisely-bounded result is a stronger contribution than an overclaimed broader one. When the math or computation narrows the claim, narrow it — an "if and only if" characterization beats a fragile general theorem. Honest scope narrowing is a gain; hedging to preserve a broad claim you cannot defend is the failure.
 
+## Core principle: substance over form when content is exceptional
+
+Rubric calibrations, polish checklists, and parsimony rules filter weak work — they are not absolute. When a result is genuinely exceptional but violates a guideline *by necessity of its content* (e.g., MM-style irrelevance has no "decision change"; a calibration paper has no NOVEL-tagged implications; an existence theorem has no comparative statics), `scorer{,-freeform}` and `referee{,-freeform,-mechanism}` may relax the guideline — naming it, explaining in one sentence why content earns relaxation, and stating the alternative check. Math-audit FAIL and Novelty KNOWN are never waived. The bar is exceptional content the rubric wasn't built to score; use sparingly.
+
 ## Core principle: tool failure is not substantive failure
 
 When a **computational or retrieval tool** fails — a numerical solver that doesn't converge, a regression that returns empty, a literature search that finds nothing, a data query that times out, a compiler that errors — the first hypothesis is that the tool was misfit to the case, not that the claim is false. Launch the `debugger` agent on the failure report. Debugger diagnoses tool-fit vs substantive failure and proposes a concrete fix. Only after debugger returns `SUBSTANTIVE-FAILURE` is the failure a signal about the claim. Do not rescope, reinterpret, or weaken a claim on the strength of a failed tool alone.
@@ -90,11 +94,21 @@ Stage 1: Idea Generation     ──→ Gate 1: Idea Review (iterates with genera
                                      → winner copied to canonical files
                                    ├── all K eliminated → new Round of Stage 1
                                    └── ≥1 survives → proceed to Stage 2
+<!-- THEORY_FIRST_START -->
 Stage 2: Theory Development  ──→ Gate 2: Math Audit (structured then free-form)
                                    Gate 3: Novelty Check on full theory
                                    Stage 2b: Theory Exploration (compute, verify, plot)
                                       ├── FAILS → back to Stage 2
                                       └── HOLDS/FRAGILE → proceed
+<!-- THEORY_FIRST_END -->
+<!-- EMPIRICAL_FIRST_START -->
+Stage 2: Mechanism Document  ──→ theory-generator runs in mechanism mode
+                                   (prose + DAG + ≤2 reduced-form posits)
+                                   Gate 2 (math audit) and Stage 2b (theory
+                                   exploration) are SKIPPED — mechanism mode
+                                   has no derivations or equilibria to audit
+                                   Gate 3: Novelty Check on the mechanism
+<!-- EMPIRICAL_FIRST_END -->
 Gate 3a-feasibility: Empirical Feasibility   (only if --ext empirical)
                                    ├── FALSIFIED → back to Stage 1
                                    └── OK → proceed
@@ -105,13 +119,13 @@ Stage 3b: Experiments         (only if --ext theory_llm, design + review)
 Puzzle Triage                ──→ fires if empirics/experiments contradict, OR Stage 3 PUZZLE-CANDIDATE
                                    ├── NORMAL-PROCEED → Stage 4
                                    ├── FIX-EMPIRICS → re-run empirics
-                                   ├── RECONCILE → add scope condition, Gate 2
+                                   ├── RECONCILE → add scope condition, Gate 2 (skipped under empirical-first)
                                    ├── BACK-TO-IDEA → Stage 1
                                    ├── PIVOT → rebuild theory around contradiction
-                                   │            (re-run Gate 2, Gate 3, Stage 2b, Stage 3, empirics; max 2 pivots)
+                                   │            (re-run Gate 2, Gate 3, Stage 2b, Stage 3, empirics — Gate 2/2b skipped under empirical-first; max 2 pivots)
                                    └── HONEST-NULL → Stage 5 with limits, or Stage 0
 Stage 4: Self-Attack          ──→ Gate 4: Scorer Decision (trajectory-based)
-                                   ├── ADVANCE (75+) → Stage 5
+                                   ├── ADVANCE (≥ tier threshold — see docs/stage_4.md) → Stage 5
                                    ├── REVISE  → back to Stage 2 (continue if Δ≥3, else escalate)
                                    ├── MAJOR REWORK → back to Stage 1 (continue if Δ≥3, else escalate)
                                    └── ABANDON → back to Stage 0 (max 5×)
@@ -129,7 +143,8 @@ Stage 6: Referee Simulation   ──→ editor (aggregates 3 reports → canonic
                                        target_journal_tier and may immediately ship Accept/Minor)
 Stage 7: Style Check          ──→
 Stage 8: Bibliography Verify  ──→
-Stage 9: Polish               ──→ Done (six parallel polish agents + triage + paper-writer; max 2 rounds)
+Stage 9: Polish               ──→ (eight parallel polish agents + triage + paper-writer + style re-run; max 2 rounds)
+Stage 10: Lessons             ──→ Done (orchestrator writes LESSONS_PAPER.md + LESSONS_PIPELINE.md)
 ```
 
 **Stage labels.** Letter suffixes (`2b`, `3a`, `3b`) are extension-conditional or sequence-internal sub-stages within a block, not top-level stages. `2b` runs after Gates 2/3 inside Stage 2's block; `3a`/`3b` are the empirical / theory_llm extensions paired with Stage 3 (Implications). `Gate 3a-feasibility` carries the `3a` label because it is the empirical extension's pre-check, not because it sits inside Stage 3.
@@ -150,7 +165,7 @@ Initial state (created by setup.sh):
   "theory_version": 1,
   "referee_round": 0,
   "reject_cosmetic_round": 0,
-  "target_journal_tier": "top-5",
+  "target_journal_tier": "{{INITIAL_TIER}}",
   "pivot_round": 0,
   "fix_empirics_round": 0,
   "bib_verify_round": 0,
@@ -177,11 +192,16 @@ When you start the pipeline, set `"status": "running"` and begin appending to th
 
 **History array:** Append a `{ "timestamp": "ISO-8601", "event": "description" }` entry for every pipeline event. This feeds the dashboard. Use `date -u +%Y-%m-%dT%H:%M:%SZ` to get the timestamp. Never truncate or clear the history array.
 
+<!-- THEORY_FIRST_START -->
 **`stage2b_theory_version`:** Set to the `theory_version` that Stage 2b last fully explored. Before advancing at Gate 4, the orchestrator must verify this equals the current `theory_version`; if it is stale, re-run Stage 2b on the new content (see `docs/stage_2.md` Stage 2b step 5).
+<!-- THEORY_FIRST_END -->
+<!-- EMPIRICAL_FIRST_START -->
+**`stage2b_theory_version`:** Initialized to `null` and never updated under `--mode empirical-first`. Stage 2b does not run in mechanism mode (the mechanism document has no equilibrium objects to explore), so the Gate 4 staleness rule that consumes this field does not apply here. The analogous binding rule in empirical-first mode is `stage3a_theory_version == theory_version` — see `docs/stage_3a_empirical.md` "Gate 4 enforcement". The field remains in `pipeline_state.json` only because legacy reset paths (e.g., `puzzle-triager` RECONCILE / PIVOT) write to it; those resets are harmless no-ops in mechanism mode.
+<!-- EMPIRICAL_FIRST_END -->
 
 **`reject_cosmetic_round`:** Tracks consecutive cosmetic-deepening attempts when responding to a Stage 6 Reject verdict. Increments when branch-manager (gate-5-reject context) returns COSMETIC on a deepen attempt; resets to 0 on a SUBSTANTIVE deepen, on a Regeneration Round entry, or on falling back to standard Major Revision after the deepen path is exhausted. See `docs/stage_6.md` Reject row for the full state machine.
 
-**`target_journal_tier`:** The active journal tier for Gate 4 advance threshold and Stage 6 referee variant context. Initialized to `top-5`. The Stage 6 `editor` agent may recommend a tier change (Downgrade or Upgrade) based on cross-referee tier-fit signals; on Downgrade, the orchestrator updates this field and recomputes the Gate 4 advance threshold per `docs/stage_4.md`. Allowed values: `top-5` / `field` / `letters`. See `docs/stage_6.md` "Journal-fit handling" for the procedure.
+**`target_journal_tier`:** The active journal tier for Gate 4 advance threshold and Stage 6 referee variant context. Initialized to `{{INITIAL_TIER}}` for this variant. The Stage 6 `editor` agent may recommend a tier change (Downgrade or Upgrade) based on cross-referee tier-fit signals; on Downgrade, the orchestrator updates this field to one rung down the variant ladder and recomputes the Gate 4 advance threshold per `docs/stage_4.md`. The variant's tier ladder is `{{TIER_LADDER_PROSE}}`; allowed values are {{TIER_LIST_INLINE}}. (Legacy state files with `"target_journal_tier": "top-5"` remain valid in both variants — `top-5` is the top rung in both ladders.) See `docs/stage_6.md` "Journal-fit handling" for the procedure.
 
 **`archived_best_score_r{N}`:** Records the best Gate 4 score achieved on the pre-regeneration paper at the moment Regeneration Round N begins. Initialized to `null` (key `archived_best_score_r1` is in the initial schema; for N>1 the orchestrator appends `archived_best_score_r{N}` dynamically at regeneration entry). Consumers in `docs/stage_1.md` step 2 (regeneration re-entry) read this to compare the regenerated attempt's eventual Gate 4 score against the archived value; if the regenerated attempt does not strictly beat the archive, restore the archived paper from `paper_archive/r{N}/` and ship. A `null` value means no archive comparison applies (no regeneration has fired on this branch).
 
@@ -268,19 +288,40 @@ Read `docs/stage_9.md` and proceed accordingly.
 
 ---
 
+## Stage 10: Lessons
+
+Read `docs/stage_10.md` and proceed accordingly.
+
+---
+
 ## Post-pipeline math audit rule
 
-After the pipeline is complete (`"status": "complete"`), any new or modified proposition, lemma, or corollary in `paper/sections/*.tex` must pass a math audit before being committed. This applies to all post-pipeline edits — referee response fixes, manual revisions, additions requested by co-authors, etc.
+<!-- THEORY_FIRST_START -->
+After the pipeline is complete (`"status": "complete"`), any new or modified proposition, lemma, or corollary in `paper/sections/*.tex`, `paper/internet_appendix.tex`, or `paper/sections/internet_appendix/*.tex` must pass a math audit before being committed. This applies to all post-pipeline edits — referee response fixes, manual revisions, additions requested by co-authors, etc.
 
 **Procedure:**
 1. Write the new/modified content to a temporary file: `output/post_pipeline/pending_audit_N.md`
 2. Launch `math-auditor` on that file
 3. Save result to `output/post_pipeline/audit_result_N.md`
-4. If FAIL: fix the content and re-audit. Do not commit to `paper/sections/` until it passes.
-5. If PASS: commit the content to the paper section file.
+4. If FAIL: fix the content and re-audit. Do not commit to the paper section / IA file until it passes.
+5. If PASS: commit the content to the paper section / IA file.
 6. Commit format: `paper: post-pipeline edit — [description] (audited)`
 
 **Never commit unaudited mathematical content to paper sections after pipeline completion.** The pipeline's v1 runs showed 3/3 post-pipeline audits failed — this rule exists to prevent that.
+<!-- THEORY_FIRST_END -->
+<!-- EMPIRICAL_FIRST_START -->
+Empirical-first papers do not contain propositions, lemmas, or corollaries — `paper-writer` is instructed to use estimation tables and a posited reduced-form mechanism, not theorem/proof environments. The theory-mode post-pipeline math audit rule therefore does not apply. (The `math-auditor` agent is still assembled into the deployment — agent assembly is mode-invariant — but Gate 2 is skipped and `paper-writer` does not produce content for it to audit; it should not be invoked in this mode.)
+
+**Empirical-first analogue.** Any post-pipeline edit that adds or modifies an empirical claim (a new coefficient, a new robustness specification, a new heterogeneity test, or a re-stated identification assumption) must be backed by a re-runnable analysis script and a re-fired `empirics-auditor` PASS before being committed:
+
+1. The empiricist (or the operator, if working manually) updates `code/empirical.py` (or a new `code/empirical_post_v1.py`) and re-runs to produce the updated number.
+2. Launch `empirics-auditor` on the updated analysis with instruction "post-pipeline edit verification: confirm the updated coefficient / table reproduces from the code, and that the new claim does not violate the identification assumptions established in `output/stage3a/identification_audit.md`."
+3. Save the audit verdict to `output/post_pipeline/empirics_audit_post_N.md`.
+4. If FAIL: fix the analysis and re-audit. Do not commit the new number to the paper until PASS.
+5. If PASS: commit the number to the paper section / IA file. Commit format: `paper: post-pipeline edit — [description] (empirics audited)`.
+
+If the post-pipeline edit introduces a formal proposition or lemma despite the paper being empirical-first (e.g., a referee insists on formalizing a comparative-static claim), the operator should re-run setup with `--no-mode` to convert the deployment to theory-first before producing the formal content — the empirical-first deployment lacks the theorem-mode pipeline infrastructure (Gate 2, theory-generator chain, theorem/proof scaffolding) that formal claims require, and adding them ad-hoc post-pipeline produces unaudited mathematical content that the runtime was not configured to verify. (The `math-auditor` agent is assembled, but the surrounding pipeline stages are not.)
+<!-- EMPIRICAL_FIRST_END -->
 
 ---
 
@@ -288,7 +329,7 @@ After the pipeline is complete (`"status": "complete"`), any new or modified pro
 
 **Once a paper draft exists (Stage 5+), the pipeline must produce a finished paper.** Do not loop back to Stage 0 after investing in paper writing. Instead, use the deepening playbook below to strengthen the paper. A regeneration round per the escalation table is permitted post-Stage-5; it re-enters at Stage 1, not Stage 0.
 
-If the scorer plateaus in the 55-74 range or the referee gives Major Revision with structural concerns (result is fragile, too narrow, or shallow):
+If the scorer plateaus in the REVISE band for the current target tier (see `docs/stage_4.md` — e.g., 60-79 for `top-5`, 55-74 for `top-3-fin`, 45-64 for `field`) or the referee gives Major Revision with structural concerns (result is fragile, too narrow, or shallow):
 
 ### Deepening playbook
 
@@ -297,9 +338,15 @@ When the core result is correct but thin, extend it with mathematically hard, ec
 **Extension types:** continuous time (HJB/SDEs), incomplete markets/heterogeneity (Bewley/HANK), learning/incomplete information, general preferences (CRRA/EZ/habits), higher dimensions (N assets, continuum of agents), perturbation/approximation (formal error bounds), dynamic/stochastic, moral hazard/agency, adverse selection, mechanism design, network/contagion.
 {{EMPIRICAL_PLAYBOOK_ADDENDUM}}
 
-**How to apply:** Identify the specific economic weakness from scorer/self-attack feedback. Pick 1-2 extensions that test whether the channel survives under realistic features. Prove the result or prove it breaks (a counterexample is as valuable as a positive result). Re-run Gate 2 + Gate 4 on extensions.
+**How to apply:** Identify the specific economic weakness from scorer/self-attack feedback. Pick 1-2 extensions that test whether the channel survives under realistic features. Prove the result or prove it breaks (a counterexample is as valuable as a positive result).
+<!-- THEORY_FIRST_START -->
+Re-run Gate 2 + Gate 4 on extensions.
+<!-- THEORY_FIRST_END -->
+<!-- EMPIRICAL_FIRST_START -->
+Re-run Stage 3a (empirical re-fire on the extension's new prediction) + Gate 4 on extensions. Gate 2 is skipped under empirical-first; Gate 3 (novelty) re-fires only if the extension introduces a structurally new channel.
+<!-- EMPIRICAL_FIRST_END -->
 
-**When to extend vs. start over:** Score 55+ with correct core → extend. Score < 35 or core wrong → start over. Novelty KNOWN → start over.
+**When to extend vs. start over:** Score in the REVISE band or above for the current target tier with correct core → extend. Score in the ABANDON band or core wrong → start over. Novelty KNOWN → start over.
 
 ---
 
@@ -311,20 +358,26 @@ When the core result is correct but thin, extend it with mathematically hard, ec
 | Idea review rejects all | 1 rejection | Return to Stage 0 for a different problem |
 | Gates 1b/1c parallel screening eliminates all candidates | All top-K KNOWN at 1b OR BLOCKED at 1c | New Round of Stage 1 (counts toward 5-round limit) |
 | Gate 3 novelty INCREMENTAL | 3 rework attempts at Stage 2 | Abandon this idea, return to Stage 1 for a new one |
+<!-- THEORY_FIRST_START -->
 | Math audit fails | 3 attempts | Abandon this theory version |
+<!-- THEORY_FIRST_END -->
+<!-- EMPIRICAL_FIRST_START -->
+| Identification audit fails | 3 plan-revision rounds (cap from `stage_3a_empirical.md`) | Treat as FAIL — empiricist selects a different design from the menu, or escalate per `stage_3a_empirical.md` step 3 routing |
+| Empirics audit fails | 5 audit-fix attempts (cap from `stage_3a_empirical.md`) | Treat as theory-version failure — re-fire theory-generator (mechanism mode) with the audit notes as input |
+<!-- EMPIRICAL_FIRST_END -->
 | Scorer: delta ≥ 3 with substantive content change | — | Allow one more iteration in current band |
 | Scorer: delta ≥ 3 from reframing only | — | Treat as plateau — escalate. Reframing is not progress (see `stage_4.md`). |
 | Scorer: delta < 3 (plateau/decline) | — | Escalate one level (REVISE → MAJOR REWORK → ABANDON) |
-| Scorer: hard ceiling | 8 total evaluations on same problem | If score ≥ 55: switch to deepening playbook. If score < 55: escalate one level. |
-| Scorer plateau 55-74 | 2 consecutive delta < 3 | Switch to deepening playbook — the core idea works, it needs mathematical depth, not reworking. |
-| Scorer plateau 55-74, branch-manager §E = Regenerate, no prior regen on this problem (`regeneration_round == 0`), **not seeded** | — | Fire regeneration round at Stage 1 (see `docs/stage_1.md` "Regeneration round"). Increment `regeneration_round` *before* re-entering Stage 1. **Takes precedence over the deepening-playbook row above when both fire** — Regenerate is the §E verdict that supersedes the default plateau routing. **At most one regeneration per problem:** if the regenerated attempt also plateaus, this row no longer fires (`regeneration_round > 0`) and the "Scorer plateau 55-74" row directly above applies — switch to the deepening playbook. |
+| Scorer: hard ceiling | 8 total evaluations on same problem | If score is in the REVISE band or above for the current target tier (see `docs/stage_4.md`): switch to deepening playbook. Otherwise (MAJOR REWORK or ABANDON band): escalate one level. |
+| Scorer plateau in the REVISE band for the current target tier | 2 consecutive delta < 3 | Switch to deepening playbook — the core idea works, it needs mathematical depth, not reworking. |
+| Scorer plateau in the REVISE band for the current target tier, branch-manager §E = Regenerate, no prior regen on this problem (`regeneration_round == 0`), **not seeded** | — | Fire regeneration round at Stage 1 (see `docs/stage_1.md` "Regeneration round"). Increment `regeneration_round` *before* re-entering Stage 1. **Takes precedence over the deepening-playbook row above when both fire** — Regenerate is the §E verdict that supersedes the default plateau routing. **At most one regeneration per problem:** if the regenerated attempt also plateaus, this row no longer fires (`regeneration_round > 0`) and the plateau row directly above applies — switch to the deepening playbook. |
 | Theory scored ABANDON | 5 theories on same problem | Change the problem (Stage 0) |
 | Problem viability fails | 5 problems | Pick the best scoring problem and proceed anyway |
 | Editor: Major Revision (aggregated verdict) | Structural concerns (fragile, narrow, shallow) | Use deepening playbook. Triage editor's canonical comment list; revise; re-run Stage 6. Be patient — keep going as long as each round surfaces any new issue. Max 10 rounds. |
 | Mechanism referee: MISATTRIBUTED unresolved | Still MISATTRIBUTED at `referee_round >= 10` | Adopt the mechanism referee's identified driver as the paper's mechanism; rewrite introduction/mechanism sections and ship. **Force-adoption at round-10 resolves all outstanding locked mechanism `[FIX]` items as satisfied — no further revision cycle is required.** In seeded mode, prefer the narrow-framing path from the seed override (present what the math delivers under the seed's topic, acknowledge the mechanism-claim divergence in limitations) rather than adopting an unrelated driver. Never return to Stage 0 (never-abandon). |
 | Mechanism referee: DECORATIVE unresolved | Still DECORATIVE at `referee_round >= 10` | Ship the narrow-path version: after 10 rounds the restructure path has failed to surface real economic content, so narrow is the principled default. Present what the math delivers as a structural characterization, strip mechanism framing, add a limitations paragraph. **Round-10 narrow-adoption resolves all outstanding locked mechanism `[FIX]` items as satisfied.** Never return to Stage 0 (never-abandon, scientist-first). |
 | Editor: Reject (aggregated verdict) | — | Stage 6 fires only post-Stage-5, so a paper draft always exists; never-abandon. Reject routes through triage → deepen directive → deepen mandate (see `docs/stage_6.md` Reject row for full procedure). The pre-Stage-5 "Stage 0 / Stage 2" branches do not exist at this point. On two consecutive cosmetic deepen attempts, the orchestrator routes through the Regeneration Round protocol if eligible (`regeneration_round == 0`, not seeded), otherwise falls back to standard Major Revision (never-abandon). |
-| Editor: Downgrade tier recommendation | — | Update `target_journal_tier` in pipeline state, recompute Gate 4 advance threshold per the new tier. If aggregated verdict is Accept/Minor Revision at the new tier (current paper clears the new threshold), proceed to Stage 7. If Major Revision, continue the loop targeting the lower tier; the next round's referees inherit the updated tier in their variant context. See `docs/stage_6.md` "Journal-fit handling". |
+| Editor: Downgrade tier recommendation | — | Update `target_journal_tier` in pipeline state to one rung down the variant ladder (`{{TIER_LADDER_PROSE}}`), recompute Gate 4 advance threshold per the new tier. If aggregated verdict is Accept/Minor Revision at the new tier (current paper clears the new threshold), proceed to Stage 7. If Major Revision, continue the loop targeting the lower tier; the next round's referees inherit the updated tier in their variant context. See `docs/stage_6.md` "Journal-fit handling". |
 
 Before granting another iteration on a Δ≥3 score increase, the orchestrator classifies the v(N)→v(N−1) diff as substantive or cosmetic. Branch-manager emits this verdict at every Gate 4 (Section A); when it reports COSMETIC, the orchestrator escalates rather than continue. Definitions and the cosmetic-edit catalogue live in `docs/stage_4.md`.
 
@@ -337,8 +390,14 @@ output/                   # Pipeline outputs by stage
 ├── seed/                 # (--seed mode only) user idea files + pipeline reports
 ├── stage0/               # literature_map_broad.md, gap_selection.md, literature_map.md, problem_statement.md
 ├── stage1/               # idea sketches, reviews, selected_idea.md, novelty + prototype
+<!-- THEORY_FIRST_START -->
 ├── stage2/               # theory drafts, math audits, novelty checks (versioned _v1, _v2…)
 ├── stage2b/              # theory exploration report + figures/
+<!-- THEORY_FIRST_END -->
+<!-- EMPIRICAL_FIRST_START -->
+├── stage2/               # mechanism documents, novelty checks (versioned _v1, _v2…). No math audit files in this mode.
+                          # (stage2b/ is not created — theory exploration is skipped)
+<!-- EMPIRICAL_FIRST_END -->
 ├── stage3/               # implications.md
 ├── stage3a/              # empirical feasibility + full analysis (if --ext empirical)
 ├── stage3b/              # LLM experiments (if --ext theory_llm)
@@ -352,6 +411,7 @@ code/
 ├── tmp/                  # scratch/intermediate scripts
 paper/
 ├── main.tex
+├── internet_appendix.tex # standalone IA, populated only when a single proof exceeds ~3 pages or the in-paper appendix would otherwise exceed ~30% of main-text length; otherwise a no-op placeholder
 ├── sections/             # introduction, model, results, discussion, conclusion, appendix
 ├── referee_reports/
 process_log/

@@ -2,11 +2,15 @@
 
 AFTER EVERY BIG CHANGE  SPAN A SONNET AGENT TO REVIEW YOUR CHANGES FOR ISSUES. IF ANY ISSUES ARE FOUND, ADD A NEW ROUND OF AUDITING AFTER FIXING THE CURRENT ROUND'S ISSUES (EVEN IF THERE ARE ONLY MINOR CHANGES). ITERATE UNTIL DONE.
 
+WHEN ADDING A NEW INFRASTRUCTURE PATH TO `setup.sh` (DIR OR FILE THAT GETS DEPLOYED), ALSO ADD IT TO THE `candidate_dirs` / `candidate_files` LIST IN THE MANIFEST EMISSION BLOCK; OTHERWISE `update.sh` WILL SILENTLY SKIP IT WHEN REFRESHING EXISTING DEPLOYMENTS.
+
+WHEN ADDING A NEW `{{KEY}}` PLACEHOLDER TO ANY AGENT BODY (SHARED, VARIANT, OR EXTENSION), ADD A DEFAULT VALUE FOR THE KEY TO EVERY EXISTING VARIANT vocab.json (`templates/agents/{finance,macro}/vocab.json` AT MINIMUM). THE LOADER (`scripts/agent_body_loader.py`) RAISES `KeyError` ON UNRESOLVED PLACEHOLDERS, SO A MISSING DEFAULT BREAKS ASSEMBLY FOR ANY VARIANT THAT DOESN'T DEFINE THE KEY — FAIL-LOUD IS THE CORRECT BEHAVIOR, BUT IT MEANS A VARIANT-ONLY EDIT WILL BREAK SETUP FOR THE OTHER VARIANTS UNTIL THE KEY IS BACKFILLED. EXTENSION-AGENT PLACEHOLDERS HAVE THE SAME RULE — ANY NEW KEY IN AN EXTENSION BODY MUST APPEAR IN EVERY VARIANT VOCAB THE EXTENSION CAN COMPOSE WITH (CURRENTLY BOTH FINANCE AND MACRO).
+
 ## What this is
 
 This is the **template repository** for the autonomous research paper pipeline. We are building and iterating on the pipeline infrastructure itself — agents, setup scripts, AGENTS.md templates, dashboard, etc.
 
-This local AGENTS.md mirrors the tracked `CLAUDE.md` guidance for Codex sessions. It is for our development work only. The pipeline's AGENTS.md that end users see is assembled by `setup.sh` from `templates/shared/core.md` + `templates/runtime/claude/session.md` + `templates/runtime/codex/session.md` + variant-specific scoring blocks.
+This local AGENTS.md mirrors the tracked `CLAUDE.md` guidance for Codex sessions. It is for our development work only. The pipeline's AGENTS.md that end users see is assembled by `setup.sh` from `templates/shared/core.md` + runtime session guidance + per-variant vocab substitution. (Variant-specific scorer calibrations live in `templates/agents/{variant}/vocab.json` and are substituted into the scorer agent body, not appended as a separate block.)
 
 ## Working principle: no unsolved or undocumented architectural limits
 
@@ -131,9 +135,6 @@ templates/
 │   ├── bib_verify/          # OpenAlex bibliography verifier
 │   ├── openalex/            # OpenAlex literature CLI
 │   └── corbis/              # Corbis MCP preflight marker
-├── scoring/
-│   ├── finance.md           # Scoring calibrations for finance
-│   └── macro.md             # Scoring calibrations for macro
 ├── agents/                  # Variant agent prompt bodies (source of truth; no frontmatter)
 │   ├── finance/
 │   └── macro/
@@ -200,9 +201,8 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 2. Reads `--variant` flag (default: `finance`)
 3. Assembles runtime docs (CLAUDE.md, AGENTS.md, GEMINI.md):
    - Reads `templates/shared/core.md` (runtime-agnostic orchestrator)
-   - In autonomous mode, injects the shared Claude session guidance plus Codex/Gemini discipline blocks
-   - In manual mode, injects each runtime's `session_manual.md`
-   - Injects `templates/scoring/{variant}.md` as `{{SCORING}}`
+   - Injects runtime-specific session guidance from `templates/runtime/{runtime}/session.md`
+   - Substitutes per-variant scorer calibrations from `templates/agents/{variant}/vocab.json` into the scorer agent body
    - If `--seed`: injects `templates/shared/seed.md` as `{{SEED_OVERRIDE}}`
    - Replaces `{{PAPER_TYPE}}`, `{{TARGET_JOURNALS}}`, `{{DOMAIN_AREAS}}`, `{{RUNTIME_DOC_NAME}}`, `{{AGENT_DIR}}`, `{{SKILL_DIR}}`
 4. Assembles agents from metadata + prompt bodies:
@@ -228,7 +228,7 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 
 1. Add or update entries in `templates/agent_metadata/claude_variant_agents.json`
 2. Create agent bodies: `templates/agents/{variant}/` with markdown prompts
-3. Create `templates/scoring/{variant}.md` with scoring calibrations
+3. Create `templates/agents/{variant}/vocab.json` with the per-variant vocabulary keys (scorer calibrations, importance/novelty/surprise rubrics, mechanism term, referee role, etc.) — see `templates/agents/finance/vocab.json` for the full set.
 4. Add variant config to `setup.sh` (paper type, target journals, journal list, domain areas)
 5. Test: `./setup.sh --variant {variant} --local`
 
@@ -236,7 +236,7 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 
 The pipeline is split into two layers:
 
-- **Runtime-agnostic**: `templates/shared/core.md` (orchestrator logic, pipeline stages, scoring), `templates/agent_bodies/shared/` and `templates/agents/{variant}/` (agent prompts), `templates/scoring/` — these are the same regardless of runtime.
+- **Runtime-agnostic**: `templates/shared/core.md` (orchestrator logic, pipeline stages), `templates/agent_bodies/shared/` and `templates/agents/{variant}/` (agent prompts and per-variant vocab including scorer calibrations) — these are the same regardless of runtime.
 - **Runtime-specific**: `templates/runtime/{claude,codex,gemini}/session.md` (session guidance per runtime), `templates/agent_metadata/claude_*.json` (shared metadata with per-runtime overrides via `codex` and `gemini` keys), `scripts/assemble_{claude_agents,codex_subagents,gemini_agents}.py`.
 
 Three runtimes share the same core + agent bodies, with runtime-specific packaging.

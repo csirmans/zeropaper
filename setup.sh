@@ -1,10 +1,18 @@
 #!/bin/bash
 # Auto AI Research Template — Setup & Launch
-# Usage: ./setup.sh [project-name] [--variant finance|macro] [--ext empirical|theory_llm] [--seed|--manual] [--light] [--local]
+# Usage: ./setup.sh [project-name] [--variant finance|macro] [--mode empirical-first]
+#                  [--ext empirical|theory_llm] [--seed|--manual] [--light] [--local]
 #
 # --local   Skip git clone, use templates from this repo directly.
 #           Outputs to test_output/{variant}/ for inspection.
 # --ext     Add an extension (can be repeated). Available: empirical, theory_llm
+# --mode    Pipeline-architecture mode (orthogonal to --variant). Available:
+#             empirical-first  — flips the pipeline so identification design and
+#                                empirical results lead and theory-generator runs
+#                                in mechanism mode (prose+DAG, no theorem/proof).
+#                                Auto-implies --ext empirical. Finance variant only
+#                                in v1; macro is gated on adding identification
+#                                tooling there.
 # --seed    Create a seeded-idea project. Creates output/seed/ with instructions.
 #           Drop your idea files there before launching. Pipeline starts at seed_triage.
 # --manual  Manual mode: assemble agents/skills as a research toolkit, no autonomous
@@ -19,9 +27,11 @@ set -e
 # ── Parse arguments ──
 PROJECT_NAME=""
 VARIANT="finance"
+MODE=""
 LOCAL=0
 NEXT_IS_VARIANT=0
 NEXT_IS_EXT=0
+NEXT_IS_MODE=0
 SEEDED=0
 MANUAL=0
 LIGHT=0
@@ -31,6 +41,7 @@ for arg in "$@"; do
     case "$arg" in
         --variant)     NEXT_IS_VARIANT=1 ;;
         --ext)         NEXT_IS_EXT=1 ;;
+        --mode)        NEXT_IS_MODE=1 ;;
         --seed)        SEEDED=1 ;;
         --manual)      MANUAL=1 ;;
         --light)       LIGHT=1 ;;
@@ -44,6 +55,9 @@ for arg in "$@"; do
             elif [ "$NEXT_IS_EXT" = "1" ]; then
                 EXTENSIONS+=("$arg")
                 NEXT_IS_EXT=0
+            elif [ "$NEXT_IS_MODE" = "1" ]; then
+                MODE="$arg"
+                NEXT_IS_MODE=0
             else
                 PROJECT_NAME="$arg"
             fi
@@ -59,6 +73,10 @@ if [ "$NEXT_IS_EXT" = "1" ]; then
     echo "Error: --ext requires a value (empirical, theory_llm)"
     exit 1
 fi
+if [ "$NEXT_IS_MODE" = "1" ]; then
+    echo "Error: --mode requires a value (empirical-first)"
+    exit 1
+fi
 
 if [ "$MANUAL" = "1" ] && [ "$SEEDED" = "1" ]; then
     echo "Error: --manual and --seed are mutually exclusive"
@@ -72,21 +90,57 @@ if [ "$VARIANT" = "finance_llm" ]; then
     EXTENSIONS+=("theory_llm")
 fi
 
+# ── Mode validation and dependency expansion ──
+# Pipeline-architecture modes are orthogonal to variants (finance/macro) and to
+# extensions (empirical/theory_llm). A mode may auto-add an extension it depends
+# on rather than erroring when the extension is missing — flipping to
+# empirical-first without the empirical agents would be incoherent, so the
+# script implies the dependency rather than making the user type both flags.
+if [ -n "$MODE" ]; then
+    case "$MODE" in
+        empirical-first)
+            if [ "$VARIANT" != "finance" ]; then
+                echo "Error: --mode empirical-first is finance-only in v1."
+                echo "  Macro support requires identification tooling for macro (issue #18) before this mode can ship."
+                exit 1
+            fi
+            # Auto-imply --ext empirical (idempotent).
+            if [[ ! " ${EXTENSIONS[*]} " =~ " empirical " ]]; then
+                EXTENSIONS+=("empirical")
+                echo "Info: --mode empirical-first implies --ext empirical (auto-added)."
+            fi
+            ;;
+        *)
+            echo "Unknown mode: $MODE"
+            echo "Available modes: empirical-first"
+            exit 1
+            ;;
+    esac
+fi
+
 # ── Variant configuration ──
 case "$VARIANT" in
     finance)
         PAPER_TYPE="finance theory paper"
         TARGET_JOURNALS="top-3 finance journal (JF, JFE, RFS)"
         DOMAIN_AREAS="finance theory — asset pricing, corporate finance, information economics, market design, financial intermediation, or behavioral finance"
-        JOURNAL_LIST="Top-3 finance: JF, JFE, RFS. Also: Review of Finance, Management Science, JFQA. Top accounting: JAR, JAE, TAR, RAS. Top-5 econ: AER, Econometrica, QJE, JPE, ReStud."
+        JOURNAL_LIST="Top-3 finance: JF, JFE, RFS. Also: Review of Finance, Management Science, JFQA, JF Insights & Perspectives (JFIP — slotted at field tier; ≤7k words, single-insight, no R&R). Top accounting: JAR, JAE, TAR, RAS. Top-5 econ: AER, Econometrica, QJE, JPE, ReStud."
         AGENT_DIR="finance"
+        INITIAL_TIER="top-3-fin"
+        TIER_LADDER_PROSE='top-5 → top-3-fin → field → letters'
+        TIER_LIST_INLINE='`top-5`, `top-3-fin`, `field`, `letters`'
+        TIER_DOWNGRADE_EXAMPLES='for `top-3-fin`: JF, JFE, RFS; for `field`: JFQA, Review of Finance, Management Science, JF Insights \& Perspectives; for `letters`: Economics Letters'
         ;;
     macro)
         PAPER_TYPE="macroeconomics theory paper"
         TARGET_JOURNALS="top-5 economics journal (AER, Econometrica, QJE, JPE, ReStud) or leading macro field journal (JME, JEDC, AEJ:Macro)"
         DOMAIN_AREAS="macroeconomics"
-        JOURNAL_LIST="Top-5 econ: AER, Econometrica, QJE, JPE, ReStud. Top-3 finance: JF, JFE, RFS. Macro field: JME, JEDC, AEJ:Macro, AEJ:Micro, JIE, JET, RED."
+        JOURNAL_LIST="Top-5 econ: AER, Econometrica, QJE, JPE, ReStud. Top-3 finance: JF, JFE, RFS. Macro field: JME, JEDC, AEJ:Macro, AEJ:Micro, JIE, JET, RED, AER Insights (≤6k words, single-mechanism — slotted at field tier on current market read)."
         AGENT_DIR="macro"
+        INITIAL_TIER="top-5"
+        TIER_LADDER_PROSE='top-5 → field → letters'
+        TIER_LIST_INLINE='`top-5`, `field`, `letters`'
+        TIER_DOWNGRADE_EXAMPLES='for `field`: JME, JEDC, AEJ:Macro, RED, AER Insights; for `letters`: Economics Letters'
         ;;
     *)
         echo "Unknown variant: $VARIANT"
@@ -94,6 +148,25 @@ case "$VARIANT" in
         exit 1
         ;;
 esac
+
+# ── Mode-conditional overrides for variant descriptors ──
+# Mode flags can re-frame what kind of paper the deploy produces. PAPER_TYPE
+# and DOMAIN_AREAS feed CLAUDE.md's opening prose, the agent metadata
+# descriptions, and the literature-scout's variant context — they need to
+# accurately describe an empirical-first deploy as such, not as a theory
+# paper. TARGET_JOURNALS does not change (top-3 finance journals publish
+# both theory and empirical work). JOURNAL_LIST also unchanged.
+if [ "$MODE" = "empirical-first" ]; then
+    case "$VARIANT" in
+        finance)
+            # Article-safe: starts with consonant ("c") so the "a {{PAPER_TYPE}}"
+            # template in core.md reads correctly. (Switching to "an" would
+            # break the default-mode "a finance theory paper" wording.)
+            PAPER_TYPE="causal-identification empirical finance paper"
+            DOMAIN_AREAS="empirical finance — asset pricing, corporate finance, information economics, market design, financial intermediation, or behavioral finance — with the contribution resting on a credibly-identified causal estimand plus a prose+DAG mechanism"
+            ;;
+    esac
+fi
 
 # ── Resolve paths ──
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -115,13 +188,64 @@ if [ "$LIGHT" = "1" ]; then
     MODEL_OVERRIDE_ARGS=(--model-override sonnet)
 fi
 
+# ── Mode-overlay paths ──
+# When --mode is set, the variant assemblers append a mode-specific shared
+# bodies dir (consulted before the base shared dir; first match wins, so a
+# mode override of `theory-generator-core.md` shadows the base body) and a
+# mode-specific vocab overlay (merged onto the base variant vocab; later
+# layer wins on duplicate keys, so mode-specific values override defaults).
+# Sourcing both via per-mode dirs lets future modes drop in their own
+# overrides without further setup.sh wiring.
+MODE_BODIES_OVERLAY=""
+MODE_VOCAB_OVERLAY=""
+if [ -n "$MODE" ]; then
+    mode_slug="${MODE//-/_}"  # 'empirical-first' → 'empirical_first'
+    candidate_bodies="$SCRIPT_DIR/templates/agent_bodies/shared_modes/${mode_slug}"
+    candidate_vocab="$SCRIPT_DIR/templates/agents/${AGENT_DIR}_modes/${mode_slug}/vocab.json"
+    if [ -d "$candidate_bodies" ]; then
+        MODE_BODIES_OVERLAY="$candidate_bodies"
+    fi
+    if [ -f "$candidate_vocab" ]; then
+        MODE_VOCAB_OVERLAY="$candidate_vocab"
+    fi
+    # Either layer may be empty if the mode has no overrides at that layer
+    # (e.g., a pure-vocab mode with no body overrides). But shipping a mode
+    # name with neither layer present is a configuration error.
+    if [ -z "$MODE_BODIES_OVERLAY" ] && [ -z "$MODE_VOCAB_OVERLAY" ]; then
+        echo "Error: --mode $MODE has no overlay assets for variant $VARIANT."
+        echo "  Expected at least one of:"
+        echo "    $candidate_bodies/"
+        echo "    $candidate_vocab"
+        exit 1
+    fi
+fi
+
 assemble_claude_shared_agents() {
     local template_root="$1"
     local dest_dir="$2"
+    # Mode overlay reaches shared agents too: a mode-specific {id}.md in
+    # MODE_BODIES_OVERLAY shadows the base shared body for that one agent
+    # (e.g., a future mode-specific referee-mechanism), and MODE_VOCAB_OVERLAY
+    # supplies any vocab keys the override references. Variant-agent shared
+    # bodies (theory-generator-core.md etc.) live in the same overlay dir
+    # under -core.md and are picked up by the variant assembler, not here.
+    #
+    # Vocab boundary: shared-agent bodies must not reference base variant
+    # vocab keys ({{DOMAIN}}, {{SUBMISSION_TIER}}, etc.) — the variant vocab
+    # is intentionally not passed here. If a future shared body needs vocab
+    # composition, the substitution must come from MODE_VOCAB_OVERLAY only,
+    # which means it can only differ across modes, not across variants.
+    # KeyError fires loudly on unresolved {{KEY}}, so the boundary is enforced.
+    local bodies_args=()
+    [ -n "$MODE_BODIES_OVERLAY" ] && bodies_args+=(--bodies-dir "$MODE_BODIES_OVERLAY")
+    bodies_args+=(--bodies-dir "$template_root/templates/agent_bodies/shared")
+    local vocab_args=()
+    [ -n "$MODE_VOCAB_OVERLAY" ] && vocab_args+=(--vocab "$MODE_VOCAB_OVERLAY")
 
     python3 "$template_root/scripts/assemble_claude_agents.py" \
         --metadata "$template_root/templates/agent_metadata/claude_shared_agents.json" \
-        --bodies-dir "$template_root/templates/agent_bodies/shared" \
+        "${bodies_args[@]}" \
+        "${vocab_args[@]}" \
         --output-dir "$dest_dir" \
         "${MODEL_OVERRIDE_ARGS[@]}"
 }
@@ -133,37 +257,18 @@ assemble_claude_variant_agents() {
     local vocab_file="$template_root/templates/agents/${variant}/vocab.json"
     local vocab_args=()
     [ -f "$vocab_file" ] && vocab_args=(--vocab "$vocab_file")
+    [ -n "$MODE_VOCAB_OVERLAY" ] && vocab_args+=(--vocab "$MODE_VOCAB_OVERLAY")
+    local shared_args=()
+    # Mode dir first so a per-agent override (e.g. theory-generator-core.md)
+    # shadows the base shared body for that one agent only.
+    [ -n "$MODE_BODIES_OVERLAY" ] && shared_args+=(--shared-bodies-dir "$MODE_BODIES_OVERLAY")
+    shared_args+=(--shared-bodies-dir "$template_root/templates/agent_bodies/shared")
 
     python3 "$template_root/scripts/assemble_claude_agents.py" \
         --metadata "$template_root/templates/agent_metadata/claude_variant_agents.json" \
         --bodies-dir "$template_root/templates/agents/${variant}" \
-        --shared-bodies-dir "$template_root/templates/agent_bodies/shared" \
+        "${shared_args[@]}" \
         "${vocab_args[@]}" \
-        --output-dir "$dest_dir" \
-        "${MODEL_OVERRIDE_ARGS[@]}"
-}
-
-assemble_codex_subagents_from_parts() {
-    local template_root="$1"
-    local metadata_file="$2"
-    local bodies_dir="$3"
-    local dest_dir="$4"
-
-    python3 "$template_root/scripts/assemble_codex_subagents.py" \
-        --metadata "$metadata_file" \
-        --bodies-dir "$bodies_dir" \
-        --output-dir "$dest_dir"
-}
-
-assemble_claude_agents_from_parts() {
-    local template_root="$1"
-    local metadata_file="$2"
-    local bodies_dir="$3"
-    local dest_dir="$4"
-
-    python3 "$template_root/scripts/assemble_claude_agents.py" \
-        --metadata "$metadata_file" \
-        --bodies-dir "$bodies_dir" \
         --output-dir "$dest_dir" \
         "${MODEL_OVERRIDE_ARGS[@]}"
 }
@@ -171,12 +276,19 @@ assemble_claude_agents_from_parts() {
 assemble_codex_shared_agents() {
     local template_root="$1"
     local dest_dir="$2"
+    # Mirrors assemble_claude_shared_agents — see comment there for the
+    # MODE_BODIES_OVERLAY / MODE_VOCAB_OVERLAY threading rationale.
+    local bodies_args=()
+    [ -n "$MODE_BODIES_OVERLAY" ] && bodies_args+=(--bodies-dir "$MODE_BODIES_OVERLAY")
+    bodies_args+=(--bodies-dir "$template_root/templates/agent_bodies/shared")
+    local vocab_args=()
+    [ -n "$MODE_VOCAB_OVERLAY" ] && vocab_args+=(--vocab "$MODE_VOCAB_OVERLAY")
 
-    assemble_codex_subagents_from_parts \
-        "$template_root" \
-        "$template_root/templates/agent_metadata/claude_shared_agents.json" \
-        "$template_root/templates/agent_bodies/shared" \
-        "$dest_dir"
+    python3 "$template_root/scripts/assemble_codex_subagents.py" \
+        --metadata "$template_root/templates/agent_metadata/claude_shared_agents.json" \
+        "${bodies_args[@]}" \
+        "${vocab_args[@]}" \
+        --output-dir "$dest_dir"
 }
 
 assemble_codex_variant_agents() {
@@ -186,37 +298,36 @@ assemble_codex_variant_agents() {
     local vocab_file="$template_root/templates/agents/${variant}/vocab.json"
     local vocab_args=()
     [ -f "$vocab_file" ] && vocab_args=(--vocab "$vocab_file")
+    [ -n "$MODE_VOCAB_OVERLAY" ] && vocab_args+=(--vocab "$MODE_VOCAB_OVERLAY")
+    local shared_args=()
+    [ -n "$MODE_BODIES_OVERLAY" ] && shared_args+=(--shared-bodies-dir "$MODE_BODIES_OVERLAY")
+    shared_args+=(--shared-bodies-dir "$template_root/templates/agent_bodies/shared")
 
     python3 "$template_root/scripts/assemble_codex_subagents.py" \
         --metadata "$template_root/templates/agent_metadata/claude_variant_agents.json" \
         --bodies-dir "$template_root/templates/agents/${variant}" \
-        --shared-bodies-dir "$template_root/templates/agent_bodies/shared" \
+        "${shared_args[@]}" \
         "${vocab_args[@]}" \
         --output-dir "$dest_dir"
-}
-
-assemble_gemini_agents_from_parts() {
-    local template_root="$1"
-    local metadata_file="$2"
-    local bodies_dir="$3"
-    local dest_dir="$4"
-
-    python3 "$template_root/scripts/assemble_gemini_agents.py" \
-        --metadata "$metadata_file" \
-        --bodies-dir "$bodies_dir" \
-        --output-dir "$dest_dir" \
-        "${MODEL_OVERRIDE_ARGS[@]}"
 }
 
 assemble_gemini_shared_agents() {
     local template_root="$1"
     local dest_dir="$2"
+    # Mirrors assemble_claude_shared_agents — see comment there for the
+    # MODE_BODIES_OVERLAY / MODE_VOCAB_OVERLAY threading rationale.
+    local bodies_args=()
+    [ -n "$MODE_BODIES_OVERLAY" ] && bodies_args+=(--bodies-dir "$MODE_BODIES_OVERLAY")
+    bodies_args+=(--bodies-dir "$template_root/templates/agent_bodies/shared")
+    local vocab_args=()
+    [ -n "$MODE_VOCAB_OVERLAY" ] && vocab_args+=(--vocab "$MODE_VOCAB_OVERLAY")
 
-    assemble_gemini_agents_from_parts \
-        "$template_root" \
-        "$template_root/templates/agent_metadata/claude_shared_agents.json" \
-        "$template_root/templates/agent_bodies/shared" \
-        "$dest_dir"
+    python3 "$template_root/scripts/assemble_gemini_agents.py" \
+        --metadata "$template_root/templates/agent_metadata/claude_shared_agents.json" \
+        "${bodies_args[@]}" \
+        "${vocab_args[@]}" \
+        --output-dir "$dest_dir" \
+        "${MODEL_OVERRIDE_ARGS[@]}"
 }
 
 assemble_gemini_variant_agents() {
@@ -226,11 +337,15 @@ assemble_gemini_variant_agents() {
     local vocab_file="$template_root/templates/agents/${variant}/vocab.json"
     local vocab_args=()
     [ -f "$vocab_file" ] && vocab_args=(--vocab "$vocab_file")
+    [ -n "$MODE_VOCAB_OVERLAY" ] && vocab_args+=(--vocab "$MODE_VOCAB_OVERLAY")
+    local shared_args=()
+    [ -n "$MODE_BODIES_OVERLAY" ] && shared_args+=(--shared-bodies-dir "$MODE_BODIES_OVERLAY")
+    shared_args+=(--shared-bodies-dir "$template_root/templates/agent_bodies/shared")
 
     python3 "$template_root/scripts/assemble_gemini_agents.py" \
         --metadata "$template_root/templates/agent_metadata/claude_variant_agents.json" \
         --bodies-dir "$template_root/templates/agents/${variant}" \
-        --shared-bodies-dir "$template_root/templates/agent_bodies/shared" \
+        "${shared_args[@]}" \
         "${vocab_args[@]}" \
         --output-dir "$dest_dir" \
         "${MODEL_OVERRIDE_ARGS[@]}"
@@ -304,6 +419,12 @@ else
     if [[ "$(uname)" == "Linux" ]]; then
         command -v bwrap >/dev/null 2>&1 || missing+=("bubblewrap (sudo apt-get install bubblewrap)")
     fi
+    # Git identity is required: setup.sh runs `git commit` on the new project, and
+    # `set -e` aborts the whole script (skipping the auto-publish step) if commit
+    # fails with "Author identity unknown". Check both global and local config.
+    if ! git config --get user.email >/dev/null 2>&1 || ! git config --get user.name >/dev/null 2>&1; then
+        missing+=("git identity (run: git config --global user.email \"you@example.com\" && git config --global user.name \"Your Name\")")
+    fi
     if [ ${#missing[@]} -gt 0 ]; then
         echo "Missing dependencies:"
         for dep in "${missing[@]}"; do echo "  - $dep"; done
@@ -341,14 +462,7 @@ else
     CODEX_SESSION="$CLAUDE_SESSION"
     GEMINI_SESSION="$CLAUDE_SESSION"
 fi
-SCORING_FILE="$TEMPLATE_ROOT/templates/scoring/${AGENT_DIR}.md"
-SCORING_ARGS=()
-if [ "$MANUAL" = "0" ]; then
-    SCORING_ARGS=(--scoring "$SCORING_FILE")
-fi
-
 REQUIRED_FILES=("$CORE" "$CLAUDE_SESSION" "$CODEX_SESSION" "$GEMINI_SESSION")
-[ "$MANUAL" = "0" ] && REQUIRED_FILES+=("$SCORING_FILE")
 for f in "${REQUIRED_FILES[@]}"; do
     if [ ! -f "$f" ]; then
         echo "Error: $f not found"
@@ -358,16 +472,21 @@ done
 
 # ── Manual mode: pre-generate agent and skill catalogs for runtime docs ──
 CATALOG_ARGS=()
+CODEX_CATALOG_ARGS=()
 if [ "$MANUAL" = "1" ]; then
     CATALOG_TMPDIR="$(mktemp -d)"
     trap 'rm -rf "$CATALOG_TMPDIR"' EXIT
     AGENT_CATALOG_FILE="$CATALOG_TMPDIR/agents.md"
     SKILL_CATALOG_FILE="$CATALOG_TMPDIR/skills.md"
+    CODEX_SKILL_CATALOG_FILE="$CATALOG_TMPDIR/skills_codex.md"
 
     AGENT_METADATA_ARGS=(
         --metadata "$TEMPLATE_ROOT/templates/agent_metadata/claude_shared_agents.json"
         --metadata "$TEMPLATE_ROOT/templates/agent_metadata/claude_variant_agents.json"
     )
+    # Skill metadata for the Claude/Gemini catalog. Codex's catalog is built
+    # separately below — codex-math is omitted there because the codex runtime
+    # IS the proof-verification backend the skill shells out to.
     SKILL_METADATA_ARGS=(
         --metadata "$TEMPLATE_ROOT/templates/skill_metadata/sympy_skills.json"
         --metadata "$TEMPLATE_ROOT/templates/skill_metadata/codex_math_skills.json"
@@ -375,6 +494,12 @@ if [ "$MANUAL" = "1" ]; then
         --metadata "$TEMPLATE_ROOT/templates/skill_metadata/openalex_skills.json"
         --metadata "$TEMPLATE_ROOT/templates/skill_metadata/corbis_skills.json"
     )
+CODEX_SKILL_METADATA_ARGS=(
+    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/sympy_skills.json"
+    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/bib_verify_skills.json"
+    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/openalex_skills.json"
+    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/corbis_skills.json"
+)
     for ext in "${EXTENSIONS[@]}"; do
         case "$ext" in
             empirical)
@@ -385,6 +510,9 @@ if [ "$MANUAL" = "1" ]; then
                 SKILL_METADATA_ARGS+=(
                     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/empirical_skills.json"
                 )
+                CODEX_SKILL_METADATA_ARGS+=(
+                    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/empirical_skills.json"
+                )
                 ;;
             theory_llm)
                 AGENT_METADATA_ARGS+=(
@@ -393,18 +521,37 @@ if [ "$MANUAL" = "1" ]; then
                 SKILL_METADATA_ARGS+=(
                     --metadata "$TEMPLATE_ROOT/templates/skill_metadata/theory_llm_skills.json"
                 )
+                CODEX_SKILL_METADATA_ARGS+=(
+                    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/theory_llm_skills.json"
+                )
                 ;;
         esac
     done
 
+    # Vocab args mirror the assembler convention: base variant vocab first,
+    # then mode overlay (last-write-wins on duplicate keys). Without this the
+    # catalog leaks {{KEY}} tokens like {{THEORY_GEN_DESCRIPTION}} for any
+    # description that's vocab-driven.
+    CATALOG_VOCAB_ARGS=()
+    [ -f "$TEMPLATE_ROOT/templates/agents/${AGENT_DIR}/vocab.json" ] && \
+        CATALOG_VOCAB_ARGS+=(--vocab "$TEMPLATE_ROOT/templates/agents/${AGENT_DIR}/vocab.json")
+    [ -n "$MODE_VOCAB_OVERLAY" ] && CATALOG_VOCAB_ARGS+=(--vocab "$MODE_VOCAB_OVERLAY")
+
     python3 "$TEMPLATE_ROOT/scripts/generate_catalog.py" \
         "${AGENT_METADATA_ARGS[@]}" \
+        "${CATALOG_VOCAB_ARGS[@]}" \
         --output "$AGENT_CATALOG_FILE"
     python3 "$TEMPLATE_ROOT/scripts/generate_catalog.py" \
         "${SKILL_METADATA_ARGS[@]}" \
+        "${CATALOG_VOCAB_ARGS[@]}" \
         --output "$SKILL_CATALOG_FILE"
+    python3 "$TEMPLATE_ROOT/scripts/generate_catalog.py" \
+        "${CODEX_SKILL_METADATA_ARGS[@]}" \
+        "${CATALOG_VOCAB_ARGS[@]}" \
+        --output "$CODEX_SKILL_CATALOG_FILE"
 
     CATALOG_ARGS=(--agent-catalog "$AGENT_CATALOG_FILE" --skill-catalog "$SKILL_CATALOG_FILE")
+    CODEX_CATALOG_ARGS=(--agent-catalog "$AGENT_CATALOG_FILE" --skill-catalog "$CODEX_SKILL_CATALOG_FILE")
 fi
 
 if [ "$LOCAL" = "1" ]; then
@@ -430,10 +577,12 @@ fi
 python3 "$TEMPLATE_ROOT/scripts/assemble_runtime_doc.py" \
     --core "$CORE" \
     --session "$CLAUDE_SESSION" \
-    "${SCORING_ARGS[@]}" \
     --paper-type "$PAPER_TYPE" \
     --target-journals "$TARGET_JOURNALS" \
     --domain-areas "$DOMAIN_AREAS" \
+    --initial-tier "$INITIAL_TIER" \
+    --tier-ladder-prose "$TIER_LADDER_PROSE" \
+    --tier-list-inline "$TIER_LIST_INLINE" \
     --doc-name "CLAUDE.md" \
     --agent-dir "$CLAUDE_AGENTS_REL" \
     --skill-dir "$CLAUDE_SKILLS_REL" \
@@ -449,16 +598,18 @@ fi
 python3 "$TEMPLATE_ROOT/scripts/assemble_runtime_doc.py" \
     --core "$CORE" \
     --session "$CODEX_SESSION" \
-    "${SCORING_ARGS[@]}" \
     --paper-type "$PAPER_TYPE" \
     --target-journals "$TARGET_JOURNALS" \
     --domain-areas "$DOMAIN_AREAS" \
+    --initial-tier "$INITIAL_TIER" \
+    --tier-ladder-prose "$TIER_LADDER_PROSE" \
+    --tier-list-inline "$TIER_LIST_INLINE" \
     --doc-name "AGENTS.md" \
     --agent-dir "$CODEX_AGENTS_REL" \
     --skill-dir "$CODEX_SKILLS_REL" \
     "${CODEX_DISCIPLINE_ARGS[@]}" \
     "${SEED_ARGS[@]}" \
-    "${CATALOG_ARGS[@]}" \
+    "${CODEX_CATALOG_ARGS[@]}" \
     --output "$AGENTS_MD_OUT"
 
 GEMINI_DISCIPLINE_ARGS=()
@@ -469,10 +620,12 @@ fi
 python3 "$TEMPLATE_ROOT/scripts/assemble_runtime_doc.py" \
     --core "$CORE" \
     --session "$GEMINI_SESSION" \
-    "${SCORING_ARGS[@]}" \
     --paper-type "$PAPER_TYPE" \
     --target-journals "$TARGET_JOURNALS" \
     --domain-areas "$DOMAIN_AREAS" \
+    --initial-tier "$INITIAL_TIER" \
+    --tier-ladder-prose "$TIER_LADDER_PROSE" \
+    --tier-list-inline "$TIER_LIST_INLINE" \
     --doc-name "GEMINI.md" \
     --agent-dir "$GEMINI_AGENTS_REL" \
     --skill-dir "$CODEX_SKILLS_REL" \
@@ -594,11 +747,22 @@ sed -e "s|{{ARP_UUID}}|$ARP_UUID|g" \
 if [ ! -f "$P/paper/main.tex" ]; then
     cp "$TEMPLATE_ROOT/templates/paper_skeleton/main.tex.template" "$P/paper/main.tex"
 fi
+# Internet appendix skeleton. paper-writer only populates it when a proof
+# exceeds ~3 pages or the in-paper appendix would otherwise blow past ~30%
+# of main-text length; otherwise it stays a no-op placeholder. Same skip-
+# if-exists guard as main.tex above.
+if [ ! -f "$P/paper/internet_appendix.tex" ]; then
+    cp "$TEMPLATE_ROOT/templates/paper_skeleton/internet_appendix.tex.template" "$P/paper/internet_appendix.tex"
+fi
 
 if [ "$MANUAL" = "1" ]; then
     mkdir -p "$P/output"
 else
-    mkdir -p "$P/output/stage0" "$P/output/stage1" "$P/output/stage2" "$P/output/stage2b/figures" "$P/output/stage3" "$P/output/stage4" "$P/output/puzzle_triage" "$P/output/post_pipeline"
+    # Stage 2b (theory exploration) is permanently skipped under
+    # --mode empirical-first; don't create the empty dir there.
+    STAGE2B_DIRS=()
+    [ "$MODE" != "empirical-first" ] && STAGE2B_DIRS=("$P/output/stage2b/figures")
+    mkdir -p "$P/output/stage0" "$P/output/stage1" "$P/output/stage2" "${STAGE2B_DIRS[@]}" "$P/output/stage3" "$P/output/stage4" "$P/output/puzzle_triage" "$P/output/post_pipeline"
     mkdir -p "$P/process_log/sessions" "$P/process_log/decisions" "$P/process_log/discussions" "$P/process_log/patterns"
 fi
 
@@ -607,8 +771,14 @@ mkdir -p "$P/docs"
 cp "$TEMPLATE_ROOT/templates/shared/docs/"*.md "$P/docs/"
 # Substitute variant placeholders (same ones assemble_runtime_doc.py handles for core.md)
 for _docfile in "$P/docs/"*.md; do
-    sed -i.bak "s|{{DOMAIN_AREAS}}|$DOMAIN_AREAS|g; s|{{PAPER_TYPE}}|$PAPER_TYPE|g; s|{{TARGET_JOURNALS}}|$TARGET_JOURNALS|g" "$_docfile" && rm "${_docfile}.bak"
+    sed -i.bak "s|{{DOMAIN_AREAS}}|$DOMAIN_AREAS|g; s|{{PAPER_TYPE}}|$PAPER_TYPE|g; s|{{TARGET_JOURNALS}}|$TARGET_JOURNALS|g; s|{{INITIAL_TIER}}|$INITIAL_TIER|g; s|{{TIER_LADDER_PROSE}}|$TIER_LADDER_PROSE|g; s|{{TIER_LIST_INLINE}}|$TIER_LIST_INLINE|g; s|{{TIER_DOWNGRADE_EXAMPLES}}|$TIER_DOWNGRADE_EXAMPLES|g" "$_docfile" && rm "${_docfile}.bak"
 done
+
+# Inject the variant-specific tier table into stage_4.md (multi-line content via sed -r)
+TIER_TABLE_FILE="$TEMPLATE_ROOT/templates/shared/tier_tables/${VARIANT}.md"
+if [ -f "$TIER_TABLE_FILE" ] && [ -f "$P/docs/stage_4.md" ]; then
+    sed -i.bak -e "/{{TIER_TABLE}}/r $TIER_TABLE_FILE" -e "/{{TIER_TABLE}}/d" "$P/docs/stage_4.md" && rm "$P/docs/stage_4.md.bak"
+fi
 
 # Function to substitute {{SEED_OVERRIDE_*}} placeholders in all docs in $P/docs/.
 # Called after shared docs copy AND after each extension copies its own docs, so
@@ -678,7 +848,6 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "theory_version": 1,
   "referee_round": 0,
   "reject_cosmetic_round": 0,
-  "target_journal_tier": "top-5",
   "pivot_round": 0,
   "fix_empirics_round": 0,
   "bib_verify_round": 0,
@@ -687,6 +856,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "pivot_resolved": null,
   "pivot_history": [],
   "triaged_lit_implications": [],
+  "target_journal_tier": "__INITIAL_TIER__",
   "status": "not_started",
   "seeded": true,
   "scores": {},
@@ -696,6 +866,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "history": []
 }
 JSONEOF
+    sed -i.bak "s|__INITIAL_TIER__|$INITIAL_TIER|g" "$P/process_log/pipeline_state.json" && rm "$P/process_log/pipeline_state.json.bak"
 else
 cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
 {
@@ -706,7 +877,6 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "theory_version": 1,
   "referee_round": 0,
   "reject_cosmetic_round": 0,
-  "target_journal_tier": "top-5",
   "pivot_round": 0,
   "fix_empirics_round": 0,
   "bib_verify_round": 0,
@@ -715,6 +885,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "pivot_resolved": null,
   "pivot_history": [],
   "triaged_lit_implications": [],
+  "target_journal_tier": "__INITIAL_TIER__",
   "seeded": false,
   "status": "not_started",
   "scores": {},
@@ -724,6 +895,7 @@ cat > "$P/process_log/pipeline_state.json" <<'JSONEOF'
   "history": []
 }
 JSONEOF
+    sed -i.bak "s|__INITIAL_TIER__|$INITIAL_TIER|g" "$P/process_log/pipeline_state.json" && rm "$P/process_log/pipeline_state.json.bak"
 fi
 
 if [ "$MANUAL" = "0" ]; then
@@ -796,19 +968,14 @@ python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
     --output-dir "$CODEX_SKILLS_OUT" \
     --mode "$SKILL_MODE"
 
-# Codex math skill (available for all variants)
+# Codex math skill (Claude-only — would be circular under the codex runtime,
+# which is itself the proof-verification backend the skill shells out to)
 assemble_claude_skills \
     "$TEMPLATE_ROOT" \
     "$TEMPLATE_ROOT/templates/skill_metadata/codex_math_skills.json" \
     "$TEMPLATE_ROOT/templates/skill_bodies/codex_math" \
     "$SKILLS_OUT" \
     "$SKILL_MODE"
-
-python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
-    --metadata "$TEMPLATE_ROOT/templates/skill_metadata/codex_math_skills.json" \
-    --bodies-dir "$TEMPLATE_ROOT/templates/skill_bodies/codex_math" \
-    --output-dir "$CODEX_SKILLS_OUT" \
-    --mode "$SKILL_MODE"
 
 # Corbis MCP skill (available for all variants — preloaded into literature-touching subagents)
 assemble_claude_skills \
@@ -898,8 +1065,17 @@ for ext in "${EXTENSIONS[@]}"; do
     case "$ext" in
         theory_llm)
             echo "Applying LLM experiment extension..."
+            if [ -n "$MODE" ]; then
+                echo "  Note: --mode $MODE does not currently propagate into the theory_llm extension agents."
+                echo "        See scripts/apply_extension_theory_llm.sh header comment for the forward-compat path."
+            fi
             LIGHT_MODEL=""
             if [ "$LIGHT" = "1" ]; then LIGHT_MODEL="sonnet"; fi
+            # NOTE: MODE_BODIES_OVERLAY / MODE_VOCAB_OVERLAY are intentionally NOT
+            # threaded here yet — see apply_extension_theory_llm.sh header comment.
+            # If a future mode wants mode-conditional theory_llm content, add the
+            # three positionals (mirroring apply_extension_empirical.sh) and
+            # remove the warning above.
             bash "$TEMPLATE_ROOT/scripts/apply_extension_theory_llm.sh" \
                 "$TEMPLATE_ROOT" \
                 "$P" \
@@ -1007,7 +1183,10 @@ PYEOF
                 "$SKILLS_OUT" \
                 "$AGENT_DIR" \
                 "$LOCAL" \
-                "$LIGHT_MODEL"
+                "$LIGHT_MODEL" \
+                "$MODE_BODIES_OVERLAY" \
+                "$MODE_VOCAB_OVERLAY" \
+                "$TEMPLATE_ROOT/templates/agents/${AGENT_DIR}/vocab.json"
 
             python3 "$TEMPLATE_ROOT/scripts/assemble_codex_skills.py" \
                 --metadata "$TEMPLATE_ROOT/templates/skill_metadata/empirical_skills.json" \
@@ -1106,9 +1285,17 @@ if os.path.exists(state_path):
             if k == "stage2b_theory_version":
                 new["stage3a_theory_version"] = None
         data = new
-        with open(state_path, "w") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
+    if "identification_plan_revision_round" not in data:
+        # Insert immediately after stage3a_theory_version. Initial value 0 (counter, not version).
+        new = {}
+        for k, v in data.items():
+            new[k] = v
+            if k == "stage3a_theory_version":
+                new["identification_plan_revision_round"] = 0
+        data = new
+    with open(state_path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
 PYEOF
 
             echo "  ✓ Empirical extension applied (skills + agents)"
@@ -1185,6 +1372,48 @@ for p in sys.argv[2:]:
             print(f"  warn: could not resolve guard in {p}: {e}", file=sys.stderr)
 PYEOF
 
+# Resolve EMPIRICAL_FIRST / THEORY_FIRST guard markers in stage docs.
+# Pattern mirrors THEORY_ONLY_GUARD: pairs of HTML-comment markers wrap
+# alternative content for theory-first vs. empirical-first orchestration.
+# When --mode empirical-first is set:
+#   - EMPIRICAL_FIRST blocks: keep content, strip just the marker lines
+#   - THEORY_FIRST blocks: strip the whole block (markers + content)
+# When --mode is unset:
+#   - EMPIRICAL_FIRST blocks: strip the whole block
+#   - THEORY_FIRST blocks: keep content, strip just the marker lines
+# Applied to docs/ only (agent-side mode-conditional content goes via vocab
+# overlays in phase 4, not markers).
+EMPIRICAL_FIRST_ON=0
+[ "$MODE" = "empirical-first" ] && EMPIRICAL_FIRST_ON=1
+# Resolver runs over stage docs, the three runtime docs (CLAUDE.md /
+# AGENTS.md / GEMINI.md, assembled from templates/shared/core.md), AND the
+# three runtimes' assembled agent files. The agent-file coverage lets shared
+# agent bodies (e.g., paper-writer.md) carry inline EMPIRICAL_FIRST /
+# THEORY_FIRST markers — the alternative is a parallel body in
+# templates/agent_bodies/shared_modes/{mode}/, which is more duplication
+# when the body's mode-specific delta is small. Vocab substitution runs at
+# assembly time (before this resolver fires), so {{KEY}} placeholders are
+# already resolved when the resolver sees the agent files.
+python3 - "$EMPIRICAL_FIRST_ON" "$P/docs/"*.md "$CLAUDE_MD_OUT" "$AGENTS_MD_OUT" "$GEMINI_MD_OUT" \
+    "$AGENTS_OUT"/*.md "$CODEX_AGENTS_OUT"/*.toml "$GEMINI_AGENTS_OUT"/*.md <<'PYEOF'
+import os, re, sys
+ef = sys.argv[1] == "1"
+if ef:
+    keep_marker = re.compile(r"<!-- EMPIRICAL_FIRST_(?:START|END) -->\n")
+    strip_block = re.compile(r"<!-- THEORY_FIRST_START -->\n.*?<!-- THEORY_FIRST_END -->\n\n?", re.DOTALL)
+else:
+    keep_marker = re.compile(r"<!-- THEORY_FIRST_(?:START|END) -->\n")
+    strip_block = re.compile(r"<!-- EMPIRICAL_FIRST_START -->\n.*?<!-- EMPIRICAL_FIRST_END -->\n\n?", re.DOTALL)
+for p in sys.argv[2:]:
+    if not os.path.exists(p):
+        continue
+    with open(p) as f: t = f.read()
+    new = strip_block.sub("", t)
+    new = keep_marker.sub("", new)
+    if new != t:
+        with open(p, "w") as f: f.write(new)
+PYEOF
+
 # Re-run seed-override substitution now that extension docs have been copied into $P/docs/.
 # Extensions may ship stage docs (e.g., stage_3a_empirical.md) containing {{SEED_OVERRIDE_*}} placeholders.
 apply_seed_overrides
@@ -1196,6 +1425,93 @@ echo ""
 echo "ℹ Corbis MCP uses OAuth by default."
 echo "  When your MCP client first connects to Corbis, authenticate in the browser."
 echo "  No Corbis credential is required or written by setup.sh."
+
+# ── Emit deployment manifest ──
+# Records what setup.sh produced as "infrastructure" — paths that update.sh
+# may overwrite when refreshing a deployed project against a newer template.
+# Anything not in this manifest is preserved on update (paper content,
+# output/, process_log/, .env values, references.bib, git history, paper/
+# arpipeline.sty fingerprint, paper/main.tex, paper/internet_appendix.tex).
+EXT_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${EXTENSIONS[@]}")
+# Capitalised for Python literal substitution into the heredoc below.
+SEEDED_BOOL=$([ "$SEEDED" = "1" ] && echo True || echo False)
+MANUAL_BOOL=$([ "$MANUAL" = "1" ] && echo True || echo False)
+LIGHT_BOOL=$([ "$LIGHT" = "1" ] && echo True || echo False)
+
+python3 <<PYEMIT
+import json
+from pathlib import Path
+
+project = Path("$P")
+manifest_path = project / ".deploy_manifest.json"
+
+# Allow-list of paths setup.sh produces. update.sh nukes-and-replaces each
+# present entry; absent entries are skipped. Only well-known infrastructure
+# paths belong here. Adding a new agent dir / script dir to setup.sh? Add
+# it here too.
+candidate_dirs = [
+    ".claude/agents",
+    ".claude/skills",
+    ".codex/agents",
+    ".agents/skills",
+    ".gemini/agents",
+    "docs",
+    "code/utils/codex_math",
+    "code/utils/bib_verify",
+    "code/utils/openalex",
+    "code/utils/corbis",
+]
+candidate_files = [
+    "CLAUDE.md",
+    "AGENTS.md",
+    "GEMINI.md",
+    ".mcp.json",
+    ".claude/settings.json",
+    ".gemini/settings.json",
+    ".gitignore",
+    "CORBIS_MCP_GUIDE.md",
+    "dashboard.html",
+]
+
+# Extension-installed files. The empirical extension drops *.py / *.sh
+# directly into code/utils/ (flat, alongside the codex_math/bib_verify/
+# openalex subdirs that core setup creates). The theory_llm extension
+# drops llm_client.py at the project root. Both are setup-managed
+# infrastructure that update.sh must refresh.
+extensions = $EXT_JSON
+if "empirical" in extensions:
+    utils = project / "code" / "utils"
+    if utils.is_dir():
+        for f in sorted(utils.iterdir()):
+            if f.is_file() and f.suffix in {".py", ".sh"}:
+                candidate_files.append(str(f.relative_to(project)))
+if "theory_llm" in extensions:
+    if (project / "llm_client.py").is_file():
+        candidate_files.append("llm_client.py")
+
+manifest = {
+    "manifest_version": 1,
+    "template_version": "$ARP_VERSION",
+    "deploy_date": "$ARP_DATE",
+    "deploy_fingerprint": "$ARP_UUID",
+    "variant": "$VARIANT",
+    "mode": "$MODE",
+    "extensions": extensions,
+    "flags": {
+        "seeded": $SEEDED_BOOL,
+        "manual": $MANUAL_BOOL,
+        "light": $LIGHT_BOOL,
+    },
+    "infrastructure": {
+        "dirs_replace": [d for d in candidate_dirs if (project / d).is_dir()],
+        "files_replace": [f for f in candidate_files if (project / f).is_file()],
+        "files_env_merge": [".env"] if (project / ".env").is_file() else [],
+    },
+}
+
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+PYEMIT
+echo "  ✓ deployment manifest written: .deploy_manifest.json"
 
 # ── Local mode: summary and exit ──
 if [ "$LOCAL" = "1" ]; then
@@ -1292,6 +1608,40 @@ if [ "$MANUAL" = "1" ]; then
     git commit -m "setup: initialized ${VARIANT} variant toolkit (manual mode)" -q
 else
     git commit -m "setup: initialized ${VARIANT} variant pipeline" -q
+fi
+
+# ── Optional: auto-publish to a GitHub org if the current user is a member ──
+# Set PUBLISH_ORG=<org> (or leave the default) to opt in. Silently skipped for
+# non-members so other users of this template just get a local repo.
+PUBLISH_ORG="${PUBLISH_ORG:-automated-papers-produced}"
+PUBLISH_VISIBILITY="${PUBLISH_VISIBILITY:-private}"
+# GitHub repo name = <project>-<first 8 chars of ARP_UUID>. The suffix is the
+# same deployment fingerprint baked into paper/arpipeline.sty (and every PDF
+# the pipeline produces), so the repo URL is a 1:1 lookup for the deployment.
+# Always-suffixing eliminates name collisions between unrelated projects that
+# happen to share a project name (e.g., two charlie-2 folders on different hosts).
+PUBLISH_SUFFIX="${ARP_UUID:0:8}"
+# PROJECT_NAME may be an absolute or relative path; GitHub repo names can't
+# contain slashes, so use just the basename for the repo name.
+PUBLISH_NAME="$(basename "$PROJECT_NAME")-${PUBLISH_SUFFIX}"
+if [ -n "$PUBLISH_ORG" ] && command -v gh >/dev/null 2>&1 \
+   && gh auth status >/dev/null 2>&1; then
+    gh_user=$(gh api user --jq .login 2>/dev/null || true)
+    if [ -n "$gh_user" ] \
+       && gh api "orgs/$PUBLISH_ORG/memberships/$gh_user" >/dev/null 2>&1; then
+        echo "Publishing to $PUBLISH_ORG/$PUBLISH_NAME ($PUBLISH_VISIBILITY)..."
+        if gh repo create "$PUBLISH_ORG/$PUBLISH_NAME" \
+               "--$PUBLISH_VISIBILITY" \
+               --source=. --remote=origin --push >/dev/null 2>&1; then
+            echo "  ✓ Pushed to $PUBLISH_ORG/$PUBLISH_NAME"
+            echo "    (deployment fingerprint: $ARP_UUID)"
+        else
+            echo "  ⚠ gh repo create failed. Repo remains local."
+            echo "    (would have published to $PUBLISH_ORG/$PUBLISH_NAME)"
+        fi
+    else
+        echo "  (skipping $PUBLISH_ORG push — not a member)"
+    fi
 fi
 
 echo ""

@@ -7,6 +7,12 @@
 
   "H2_CHECK": "Could a reader write down the equilibrium? Are agents' problems specified, market clearing stated, equilibrium concept defined?",
   "H2_SHORT_LABEL": "Well-defined equilibrium",
+  "H3_REQUIREMENT": "Key result is correct",
+  "H3_CHECK": "Both math audits passed (structured AND free-form)",
+  "H3_FAIL_ROUTING": "REVISE with specific fixes from math audit",
+  "H3_OUTPUT_LABEL": "Math correct",
+  "H3_OUTPUT_EVIDENCE": "[from math audit]",
+  "EMPIRICS_AUDITOR_MODE_BLOCK": "",
   "H5_CHECK": "The draft explains WHY the result holds in terms of economic forces — not just algebra. A macro seminar audience would understand the mechanism.",
 
   "IMPORTANCE_100": "changes a first-order policy decision that central banks or fiscal authorities make routinely (e.g., optimal monetary rule, core stabilization design, fiscal multiplier magnitude). Requires generality and immediate policy consequence.",
@@ -77,6 +83,7 @@
   "SELF_ATTACK_RULE_EXAMPLE": "Assumption 2 (Calvo pricing) is doing all the work and the result vanishes with state-dependent pricing (see Golosov-Lucas 2007), so the paper's quantitative claims are fragile",
 
   "THEORY_GEN_ROLE": "macroeconomist",
+  "THEORY_GEN_DESCRIPTION": "Proposes new macroeconomics theory models. The orchestrator launches this agent at Stage 2 (Theory Development). Supports fresh, mutate, and crossover strategies based on attempt history.",
   "THEORY_ENV_DESC": "[Agents, timing, markets, stochastic structure — only what's needed]",
   "THEORY_AGENTS_SECTION": "### Agents' problems\n[What each agent type maximizes, subject to what constraints. Write out the Bellman equation or static optimization problem explicitly.]\n\n### Equilibrium concept\n[Competitive equilibrium, recursive competitive equilibrium, Markov perfect equilibrium, etc. State the definition precisely: market clearing conditions, consistency requirements, fixed points.]",
   "THEORY_ECON_DESC": "[WHY does the result hold? In economics, not algebra. A reader who skips the math should understand. What economic force drives agents' behavior and how does it aggregate?]",

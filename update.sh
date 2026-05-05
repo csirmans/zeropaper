@@ -1,0 +1,377 @@
+#!/bin/bash
+# update.sh — Refresh pipeline infrastructure in a deployed project.
+#
+# Usage:
+#   ./update.sh <deployed-project-path>
+#   ./update.sh <deployed-project-path> --dry-run
+#   ./update.sh <deployed-project-path> --variant finance --ext empirical
+#   ./update.sh <deployed-project-path> --seeded --manual --light
+#
+# Overrides (--variant, --ext, --seeded/--no-seeded, --manual/--no-manual,
+# --light/--no-light) take precedence over the manifest's recorded values
+# AND over sniffed values for pre-manifest deploys. Use them when the
+# manifest is wrong, or when you want to migrate a project across variants.
+# Each --ext repeats; passing --ext replaces the manifest's full extension
+# list (does not append).
+#
+# What it does:
+#   1. Reads .deploy_manifest.json from the target project (or sniffs/accepts
+#      flags if the project predates manifests).
+#   2. Deploys a fresh project into a tmp dir using setup.sh --local with the
+#      same variant + extensions + flags.
+#   3. Copies allow-listed infrastructure paths from the fresh deploy into the
+#      target project (rm -rf + cp -r for dirs; overwrite for files; key-merge
+#      for .env). Everything else is preserved: paper/, output/, process_log/,
+#      data/, references.bib, .git/, paper/arpipeline.sty fingerprint.
+#   4. Prints a diff summary (added / removed / changed agents).
+#
+# Safe to re-run. Does not touch git in the target project — review and
+# commit the changes yourself.
+
+set -e
+
+# ── Parse arguments ──
+PROJECT=""
+DRY_RUN=0
+OVERRIDE_VARIANT=""
+OVERRIDE_MODE=""
+OVERRIDE_MODE_SET=0   # distinguishes "no --mode flag" from "--no-mode (clear)"
+OVERRIDE_EXTS=()
+OVERRIDE_EXTS_SET=0   # distinguishes "no --ext flags" from "--ext '' (clear list)"
+OVERRIDE_SEEDED=""    # "", "true", or "false"
+OVERRIDE_MANUAL=""
+OVERRIDE_LIGHT=""
+NEXT_IS_VARIANT=0
+NEXT_IS_MODE=0
+NEXT_IS_EXT=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run)        DRY_RUN=1 ;;
+        --variant)        NEXT_IS_VARIANT=1 ;;
+        --variant=*)      OVERRIDE_VARIANT="${arg#--variant=}" ;;
+        --mode)           NEXT_IS_MODE=1 ;;
+        --mode=*)         OVERRIDE_MODE="${arg#--mode=}";  OVERRIDE_MODE_SET=1 ;;
+        --no-mode)        OVERRIDE_MODE="";                OVERRIDE_MODE_SET=1 ;;
+        --ext)            NEXT_IS_EXT=1 ;;
+        --ext=*)          OVERRIDE_EXTS+=("${arg#--ext=}"); OVERRIDE_EXTS_SET=1 ;;
+        --clear-ext)      OVERRIDE_EXTS=();                  OVERRIDE_EXTS_SET=1 ;;
+        --seeded)         OVERRIDE_SEEDED=true ;;
+        --no-seeded)      OVERRIDE_SEEDED=false ;;
+        --manual)         OVERRIDE_MANUAL=true ;;
+        --no-manual)      OVERRIDE_MANUAL=false ;;
+        --light)          OVERRIDE_LIGHT=true ;;
+        --no-light)       OVERRIDE_LIGHT=false ;;
+        -*)               echo "Unknown option: $arg"; exit 1 ;;
+        *)
+            if [ "$NEXT_IS_VARIANT" = "1" ]; then
+                OVERRIDE_VARIANT="$arg"; NEXT_IS_VARIANT=0
+            elif [ "$NEXT_IS_MODE" = "1" ]; then
+                OVERRIDE_MODE="$arg"; OVERRIDE_MODE_SET=1; NEXT_IS_MODE=0
+            elif [ "$NEXT_IS_EXT" = "1" ]; then
+                OVERRIDE_EXTS+=("$arg"); OVERRIDE_EXTS_SET=1; NEXT_IS_EXT=0
+            else
+                PROJECT="$arg"
+            fi
+            ;;
+    esac
+done
+
+# Catch dangling NEXT_IS_* sentinels — without these, `update.sh PROJECT
+# --mode --variant finance` silently drops the --mode flag because --variant
+# is an explicit case match (not a *) fallthrough), so NEXT_IS_MODE never
+# gets consumed and OVERRIDE_MODE_SET stays 0.
+if [ "$NEXT_IS_VARIANT" = "1" ]; then
+    echo "Error: --variant requires a value (finance, macro)"; exit 1
+fi
+if [ "$NEXT_IS_MODE" = "1" ]; then
+    echo "Error: --mode requires a value (empirical-first), or use --no-mode to clear"; exit 1
+fi
+if [ "$NEXT_IS_EXT" = "1" ]; then
+    echo "Error: --ext requires a value (empirical, theory_llm)"; exit 1
+fi
+
+if [ -z "$PROJECT" ]; then
+    echo "usage: update.sh <deployed-project-path> [--dry-run] [--variant X] [--mode M] [--ext Y ...]"
+    exit 1
+fi
+
+PROJECT="$(cd "$PROJECT" && pwd)"
+TEMPLATE_ROOT="$(cd "$(dirname "$0")" && pwd)"
+MANIFEST="$PROJECT/.deploy_manifest.json"
+
+command -v jq >/dev/null 2>&1 || { echo "update.sh requires jq (sudo apt-get install jq)"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "update.sh requires python3"; exit 1; }
+
+# ── Resolve original deployment parameters ──
+# Every setup.sh flag that affects what gets deployed must be read here AND
+# re-passed in the SETUP_FLAGS block below — drift between the two breaks the
+# round-trip on update. Currently tracked: variant, mode, extensions, seeded,
+# manual, light. When adding a new setup.sh flag, update both blocks.
+if [ -f "$MANIFEST" ]; then
+    VARIANT=$(jq -r .variant "$MANIFEST")
+    MODE=$(jq -r '.mode // ""' "$MANIFEST")
+    mapfile -t EXTENSIONS < <(jq -r '.extensions[]?' "$MANIFEST")
+    SEEDED=$(jq -r .flags.seeded "$MANIFEST")
+    MANUAL=$(jq -r .flags.manual "$MANIFEST")
+    LIGHT=$(jq -r .flags.light "$MANIFEST")
+    OLD_VERSION=$(jq -r .template_version "$MANIFEST")
+    mode_str="${MODE:-(none)}"
+    echo "Found manifest: variant=$VARIANT, mode=$mode_str, extensions=[${EXTENSIONS[*]}], template=$OLD_VERSION"
+else
+    echo "No .deploy_manifest.json — pre-manifest deploy. Sniffing..."
+    # Sniff variant from CLAUDE.md
+    if grep -q "macroeconomics theory paper" "$PROJECT/CLAUDE.md" 2>/dev/null; then
+        VARIANT="macro"
+    elif grep -q "finance theory paper" "$PROJECT/CLAUDE.md" 2>/dev/null; then
+        VARIANT="finance"
+    else
+        VARIANT=""
+    fi
+    # Mode cannot be sniffed reliably — every empirical-first signature in a
+    # deployed project (mechanism body content, identification at Stage 1)
+    # could be retrofitted by hand or look the same across different
+    # decisions. Default to empty; user can pass --mode if their pre-manifest
+    # deploy was empirical-first.
+    MODE=""
+    EXTENSIONS=()
+    [ -f "$PROJECT/code/utils/wrds_client.py" ] && EXTENSIONS+=("empirical")
+    [ -f "$PROJECT/code/llm_client.py" ] && EXTENSIONS+=("theory_llm")
+    [ -d "$PROJECT/output/seed" ] && SEEDED=true || SEEDED=false
+    [ ! -d "$PROJECT/output/stage0" ] && [ ! -f "$PROJECT/dashboard.html" ] && MANUAL=true || MANUAL=false
+    LIGHT=false
+    OLD_VERSION="(pre-manifest)"
+
+    if [ -z "$VARIANT" ] && [ -z "$OVERRIDE_VARIANT" ]; then
+        echo "Could not infer variant. Pass --variant finance|macro."
+        exit 1
+    fi
+    echo "Inferred: variant=$VARIANT, extensions=[${EXTENSIONS[*]}], seeded=$SEEDED, manual=$MANUAL"
+fi
+
+# ── Apply explicit overrides (precedence: CLI flag > manifest > sniff) ──
+APPLIED_OVERRIDES=()
+if [ -n "$OVERRIDE_VARIANT" ] && [ "$OVERRIDE_VARIANT" != "$VARIANT" ]; then
+    APPLIED_OVERRIDES+=("variant: $VARIANT → $OVERRIDE_VARIANT")
+    VARIANT="$OVERRIDE_VARIANT"
+fi
+if [ "$OVERRIDE_MODE_SET" = "1" ] && [ "$OVERRIDE_MODE" != "$MODE" ]; then
+    old_mode_str="${MODE:-(none)}"
+    new_mode_str="${OVERRIDE_MODE:-(none)}"
+    APPLIED_OVERRIDES+=("mode: $old_mode_str → $new_mode_str")
+    MODE="$OVERRIDE_MODE"
+    # Mode change can leave a stale current_stage in pipeline_state.json that
+    # references a stage marker only valid in the prior mode (e.g., the
+    # empirical-first marker `stage_1_identification_design` has no handler
+    # under theory-first). The session-start resume path would then stall.
+    # Surface this so the operator can reset current_stage before relaunching.
+    MODE_CHANGE_ADVISORY=1
+fi
+if [ "$OVERRIDE_EXTS_SET" = "1" ]; then
+    OLD_EXT_STR="${EXTENSIONS[*]}"
+    NEW_EXT_STR="${OVERRIDE_EXTS[*]}"
+    if [ "$OLD_EXT_STR" != "$NEW_EXT_STR" ]; then
+        APPLIED_OVERRIDES+=("extensions: [$OLD_EXT_STR] → [$NEW_EXT_STR]")
+        EXTENSIONS=("${OVERRIDE_EXTS[@]}")
+    fi
+fi
+if [ -n "$OVERRIDE_SEEDED" ] && [ "$OVERRIDE_SEEDED" != "$SEEDED" ]; then
+    APPLIED_OVERRIDES+=("seeded: $SEEDED → $OVERRIDE_SEEDED")
+    SEEDED="$OVERRIDE_SEEDED"
+fi
+if [ -n "$OVERRIDE_MANUAL" ] && [ "$OVERRIDE_MANUAL" != "$MANUAL" ]; then
+    APPLIED_OVERRIDES+=("manual: $MANUAL → $OVERRIDE_MANUAL")
+    MANUAL="$OVERRIDE_MANUAL"
+fi
+if [ -n "$OVERRIDE_LIGHT" ] && [ "$OVERRIDE_LIGHT" != "$LIGHT" ]; then
+    APPLIED_OVERRIDES+=("light: $LIGHT → $OVERRIDE_LIGHT")
+    LIGHT="$OVERRIDE_LIGHT"
+fi
+if [ ${#APPLIED_OVERRIDES[@]} -gt 0 ]; then
+    echo
+    echo "Applying overrides:"
+    for o in "${APPLIED_OVERRIDES[@]}"; do echo "  $o"; done
+fi
+if [ "${MODE_CHANGE_ADVISORY:-0}" = "1" ]; then
+    echo
+    echo "  ⚠ Mode changed. Verify process_log/pipeline_state.json:current_stage is"
+    echo "    valid in the new mode before relaunching the pipeline."
+    echo "    - Empirical-first marker 'stage_1_identification_design' has no handler"
+    echo "      under theory-first; reset to 'stage_1' or 'stage_2' if present."
+    echo "    - Theory-first stage markers are all valid under empirical-first too,"
+    echo "      so converting theory-first → empirical-first usually needs no reset"
+    echo "      (unless the run is in Stage 2 mid-derivation — in which case reset"
+    echo "      to 'stage_1' to re-enter and pick up Step 4 identification design)."
+    echo "    See README.md (Modes section) and the runtime doc's halted-status"
+    echo "    handler for the full procedure."
+fi
+
+NEW_VERSION=$(cd "$TEMPLATE_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+# ── Build setup.sh flag list ──
+# When adding a new setup.sh flag, update both this block AND the manifest-
+# read block above so update→deploy round-trips preserve the deployment.
+SETUP_FLAGS=( --variant "$VARIANT" --local )
+[ -n "$MODE" ] && SETUP_FLAGS+=( --mode "$MODE" )
+for ext in "${EXTENSIONS[@]}"; do SETUP_FLAGS+=( --ext "$ext" ); done
+[ "$SEEDED" = "true" ] && SETUP_FLAGS+=( --seed )
+[ "$MANUAL" = "true" ] && SETUP_FLAGS+=( --manual )
+[ "$LIGHT" = "true" ] && SETUP_FLAGS+=( --light )
+
+# ── Deploy fresh into tmp ──
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+FRESH="$TMP/refresh"
+
+echo
+echo "Deploying fresh template into $FRESH ..."
+( cd "$TEMPLATE_ROOT" && bash setup.sh "$FRESH" "${SETUP_FLAGS[@]}" ) >"$TMP/deploy.log" 2>&1 || {
+    echo "Fresh deploy failed. Last 40 lines of log:"
+    tail -40 "$TMP/deploy.log"
+    exit 1
+}
+echo "  ✓ fresh deploy ok ($(wc -l < "$TMP/deploy.log") log lines)"
+
+NEW_MANIFEST="$FRESH/.deploy_manifest.json"
+if [ ! -f "$NEW_MANIFEST" ]; then
+    echo "ERROR: fresh deploy did not produce a manifest. Is setup.sh up to date?"
+    exit 1
+fi
+
+# ── Snapshot agent set BEFORE replacement (for diff) ──
+OLD_AGENTS_TMP="$TMP/old_agents.txt"
+NEW_AGENTS_TMP="$TMP/new_agents.txt"
+ls "$PROJECT/.claude/agents/" 2>/dev/null | sort > "$OLD_AGENTS_TMP" || true
+ls "$FRESH/.claude/agents/"   2>/dev/null | sort > "$NEW_AGENTS_TMP" || true
+
+# ── Apply replacements ──
+echo
+if [ "$DRY_RUN" = "1" ]; then
+    echo "=== DRY RUN — would replace ==="
+else
+    echo "=== Replacing infrastructure ==="
+fi
+
+while IFS= read -r d; do
+    [ -d "$FRESH/$d" ] || continue
+    if [ "$DRY_RUN" = "1" ]; then
+        echo "  dir : $d"
+    else
+        rm -rf "$PROJECT/$d"
+        mkdir -p "$(dirname "$PROJECT/$d")"
+        cp -r "$FRESH/$d" "$PROJECT/$d"
+        echo "  dir ✓ $d"
+    fi
+done < <(jq -r '.infrastructure.dirs_replace[]' "$NEW_MANIFEST")
+
+while IFS= read -r f; do
+    [ -f "$FRESH/$f" ] || continue
+    # Guard against type mismatch: target exists as a directory where the
+    # manifest expects a file. cp into a dir would silently put the file
+    # *inside* the dir rather than replacing it.
+    if [ -d "$PROJECT/$f" ]; then
+        echo "  file ! $f — target is a directory; skipping (manual fix needed)"
+        continue
+    fi
+    if [ "$DRY_RUN" = "1" ]; then
+        echo "  file: $f"
+    else
+        mkdir -p "$(dirname "$PROJECT/$f")"
+        # rm -f handles three cases that cp won't: regular symlinks (cp would
+        # follow and overwrite the target, corrupting wherever it points),
+        # dangling symlinks (cp errors with "not writing through dangling
+        # symlink"), and read-only files. Plain files are removed cleanly.
+        rm -f "$PROJECT/$f"
+        cp "$FRESH/$f" "$PROJECT/$f"
+        echo "  file ✓ $f"
+    fi
+done < <(jq -r '.infrastructure.files_replace[]' "$NEW_MANIFEST")
+
+# ── Merge .env (append missing keys only; never overwrite values) ──
+echo
+echo "=== Merging .env ==="
+while IFS= read -r env_file; do
+    if [ -f "$FRESH/$env_file" ] && [ -f "$PROJECT/$env_file" ]; then
+        added=0
+        while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+            key="${line%%=*}"
+            if ! grep -q "^${key}=" "$PROJECT/$env_file" 2>/dev/null; then
+                if [ "$DRY_RUN" = "1" ]; then
+                    echo "  + $key (would add)"
+                else
+                    echo "$line" >> "$PROJECT/$env_file"
+                    echo "  + $key"
+                fi
+                added=$((added+1))
+            fi
+        done < "$FRESH/$env_file"
+        [ "$added" = "0" ] && echo "  (no new keys)"
+    elif [ ! -f "$PROJECT/$env_file" ] && [ -f "$FRESH/$env_file" ]; then
+        echo "  ! $env_file missing in target — copying fresh"
+        # rm -f for the same dangling-symlink reason as files_replace: -f
+        # tests regular files, so a dangling symlink at this path would
+        # satisfy "! -f" and then trip cp.
+        if [ "$DRY_RUN" = "0" ]; then
+            rm -f "$PROJECT/$env_file"
+            cp "$FRESH/$env_file" "$PROJECT/$env_file"
+        fi
+    fi
+done < <(jq -r '.infrastructure.files_env_merge[]?' "$NEW_MANIFEST")
+
+# ── Refresh manifest in target (preserve original deploy_date + fingerprint) ──
+if [ "$DRY_RUN" = "0" ]; then
+    if [ -f "$MANIFEST" ]; then
+        # Update template_version + last_updated; sync deployment selectors
+        # (mode, extensions) from the fresh deploy so that an --override on
+        # this run is reflected in the persisted manifest. Anything not
+        # listed here passes through verbatim from the existing manifest
+        # (e.g. deploy_fingerprint, deploy_date — original deploy metadata).
+        # variant cannot be overridden mid-life on a deployed project, so
+        # it's not synced; if it ever can, add `.variant = (input | .variant)`.
+        # Bind NEW_MANIFEST once via `input as $new`; each bare `input` call
+        # consumes one file from the argv list, so reusing `(input | .X)` four
+        # times would try to read four files. The slurp pattern below reads
+        # NEW_MANIFEST once and lets us pull multiple fields from it.
+        jq --arg v "$NEW_VERSION" --arg d "$(date -u +%Y-%m-%d)" \
+           'input as $new
+            | .template_version = $v
+            | .last_updated = $d
+            | .mode = $new.mode
+            | .extensions = $new.extensions
+            | .flags = $new.flags
+            | .infrastructure = $new.infrastructure' \
+           "$MANIFEST" "$NEW_MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+    else
+        # No prior manifest — adopt the fresh manifest but blank deploy_fingerprint
+        # (we don't know the original UUID; user can copy it from paper/arpipeline.sty if needed).
+        jq --arg d "$(date -u +%Y-%m-%d)" \
+           '.deploy_fingerprint = "(unknown — pre-manifest deploy)" | .last_updated = $d' \
+           "$NEW_MANIFEST" > "$MANIFEST"
+    fi
+    echo
+    echo "  ✓ manifest updated: template_version $OLD_VERSION → $NEW_VERSION"
+fi
+
+# ── Report agent diff ──
+echo
+echo "=== Agent diff ($OLD_VERSION → $NEW_VERSION) ==="
+ADDED=$(comm -13 "$OLD_AGENTS_TMP" "$NEW_AGENTS_TMP")
+REMOVED=$(comm -23 "$OLD_AGENTS_TMP" "$NEW_AGENTS_TMP")
+if [ -n "$ADDED" ]; then
+    echo "Added:"
+    echo "$ADDED" | sed 's/^/  + /'
+fi
+if [ -n "$REMOVED" ]; then
+    echo "Removed:"
+    echo "$REMOVED" | sed 's/^/  - /'
+fi
+[ -z "$ADDED" ] && [ -z "$REMOVED" ] && echo "  (no agent additions or removals)"
+
+echo
+if [ "$DRY_RUN" = "1" ]; then
+    echo "Dry run complete. No files modified."
+else
+    echo "Update complete. Review with: cd $PROJECT && git status"
+    echo "Then commit the infrastructure refresh when ready."
+fi

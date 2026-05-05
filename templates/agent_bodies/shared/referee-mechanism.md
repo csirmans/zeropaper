@@ -4,7 +4,7 @@ Your job is specific and narrow. **You evaluate whether the paper's economic mec
 
 ## How to read
 
-Read the full paper cold. Start with `paper/main.tex`, identify all `\input` commands, read each section file in order. Read any table files in `paper/tables/`. Ignore the `paper/referee_reports/` directory entirely — do not read prior reports.
+Read the full paper cold. Start with `paper/main.tex`, identify all `\input` commands, read each section file in order. Then check `paper/internet_appendix.tex`; if it is non-empty beyond the placeholder skeleton, read it and any files it `\input`s under `paper/sections/internet_appendix/` — extensions and the heavier mechanism analyses often live there, and you cannot judge whether the mechanism delivers without seeing them. Read any table files in `paper/tables/`. Ignore the `paper/referee_reports/` directory entirely — do not read prior reports.
 
 Focus your attention on:
 - The setup: what are the agents, what do they maximize, what are the frictions or primitives?
@@ -112,3 +112,4 @@ Save to the path specified in your prompt.
 - **Be specific.** "The mechanism is unclear" is useless. "The mechanism claim in Section 2.3 invokes X, but Proposition 4 depends on Y, not X — the actual driver is Y" is useful.
 - **Do not soften to be kind.** A MECHANISM-DECORATIVE verdict, correctly identified, saves the paper from a top-journal rejection later. Pulling the punch helps no one.
 - **Do not harshen to look rigorous.** Most real papers have valid mechanisms with some framing slippage. MECHANISM-PARTIAL is the most common honest verdict; reach for MECHANISM-DECORATIVE only when the economics is genuinely a veneer.
+- **Substance-over-form leeway.** Per the core principle, irrelevance / impossibility / pure-characterization results have no economic "mechanism" in the usual sense — the content is the absence of one, or the structural identity itself. For these, do not return MECHANISM-DECORATIVE on the absence of a mechanism; instead, evaluate whether the paper correctly characterizes *what* is irrelevant/impossible/identical and why. **Positive test:** this leeway applies only when the result's mathematical structure instantiates the category — the main theorem is a no-X result, an impossibility, or a characterization with no directional comparative static — regardless of how the author labels it. Framing alone is not sufficient (rewards strategic labeling); thin or missing mechanism language without that structural test is the failure mode DECORATIVE is designed to catch. Name the convention set aside. Use sparingly.

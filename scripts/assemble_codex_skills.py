@@ -54,11 +54,31 @@ def split_frontmatter(text):
     return fm, "".join(lines[closing + 1:])
 
 
+def yaml_scalar(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    s = str(value)
+    needs_quotes = (
+        "\n" in s
+        or ": " in s
+        or s.strip() != s
+        or s == ""
+        or s.lower() in {"true", "false", "null", "yes", "no", "on", "off"}
+        or s[0] in "-?:{}[],&*#!|>@`"
+    )
+    if not needs_quotes:
+        return s
+    escaped = s.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def render_skill(metadata, body):
     lines = ["---"]
     for key in FRONTMATTER_ALLOWLIST:
         if key in metadata:
-            lines.append(f"{key}: {metadata[key]}")
+            lines.append(f"{key}: {yaml_scalar(metadata[key])}")
     lines.extend(["---", "", body.rstrip(), ""])
     return "\n".join(lines)
 

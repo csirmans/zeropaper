@@ -64,6 +64,10 @@ npm install -g @openai/codex
 
 # Gemini CLI
 npm install -g @google/gemini-cli
+
+# Git identity (one-time, used by every setup.sh run)
+git config --global user.email "you@example.com"
+git config --global user.name "Your Name"
 ```
 
 ## Quick start
@@ -83,6 +87,11 @@ cd zeropaper
 
 # Finance theory + empirical analysis (CRSP, Compustat, FRED, etc.)
 ./setup.sh my-paper --variant finance --ext empirical
+
+# Empirical-first finance: causal-identification paper (mechanism written
+# as prose+DAG, not theorem; identification design is the primary Stage 1
+# deliverable). Auto-implies --ext empirical.
+./setup.sh my-paper --variant finance --mode empirical-first
 
 # Macro theory
 ./setup.sh my-paper --variant macro
@@ -179,6 +188,16 @@ You can also watch files appear in real time in your editor, or run `git log --o
 
 Extensions are additive and combinable — they inject extra agents and skills without changing the core pipeline. Use multiple `--ext` flags to combine them.
 
+## Modes
+
+Modes flip the pipeline architecture. Orthogonal to `--variant` and `--ext`.
+
+| Mode | Flag | What it does |
+|------|------|-------------|
+| **empirical-first** | `--mode empirical-first` | Causal-identification empirical paper. The identification design becomes the primary Stage 1 deliverable (not a Stage 3a check). The mechanism section is prose + DAG + ≤2 reduced-form posits — no theorem-and-proof. Gate 2 (math audit) and Stage 2b (theory exploration) are skipped because mechanism mode has no derivations or equilibria to audit. Scorer's H3 hard requirement swaps from "math audit passed" to "identification + empirics audits passed." Auto-implies `--ext empirical`. Finance variant only in v1 (macro requires identification tooling — see [issue #18](https://github.com/alejandroll10/zeropaper/issues/18)). |
+
+If `identification-designer` returns `N/A — no causal claim` at Stage 1 (the question is irreducibly non-causal), the pipeline halts with `status = halted_no_identification_design` and prompts the operator to rerun `update.sh --no-mode` to convert the deployment back to theory-first. After the update, the operator must also reset `current_stage` in `process_log/pipeline_state.json` (to `"stage_1"` to re-pick the idea, or `"stage_2"` if the selected idea is still valid in theory-first) and flip `status` back to `"running"` before relaunching — leaving `current_stage = "stage_1_identification_design"` in place would point the resume logic at a stage doc that no longer exists in the converted deployment. The full procedure is in the runtime's halted-status handler.
+
 ## Additional flags
 
 | Flag | What it does |
@@ -209,9 +228,10 @@ Stage 5: Paper Writing
 Stage 6: Referee Simulation   → Editor aggregates 3 reports → Gate 5 decision
 Stage 7: Style Check
 Stage 8: Bibliography Verify
-Stage 9: Polish               → Done (six parallel polish agents — consistency,
+Stage 9: Polish               → Done (eight parallel polish agents — consistency,
                                  formula, numerics, institutions, equilibria,
-                                 bibliography — triaged + applied; max 2 rounds)
+                                 identification, bibliography, prose — triaged
+                                 + applied; max 2 rounds)
 ```
 
 Each gate is adversarial. Failed theories get revised, reworked, or abandoned. The system loops until it produces a paper that passes simulated referee review.
@@ -247,9 +267,11 @@ Each gate is adversarial. Failed theories get revised, reworked, or abandoned. T
 | `polish-formula` | Re-derives every numbered equation in the rendered paper (codex-math + sympy) |
 | `polish-numerics` | Recomputes every numerical claim from stated parameters |
 | `polish-institutions` | Verifies real-world claims and faithful characterization of cited papers |
-| `polish-equilibria` | Catches multiple equilibria, missing LLN/continuum assumptions, reduced-form/structural bridges |
+| `polish-equilibria` | Catches multiple equilibria, missing LLN/continuum assumptions, reduced-form/structural bridges (theory papers) |
+| `polish-identification` | Audits identification-coherence in the rendered paper: estimand-vs-claim, diagnostics-vs-design, cluster level, identification.tex faithfulness, heterogeneity-population coherence (empirical papers) |
 | `polish-bibliography` | Per-citation prose-claim verification via Corbis/OpenAlex/WebFetch |
-| `bib-verifier` | Verifies cite-key validity against OpenAlex with Corbis enrichment and WebSearch fallback |
+| `polish-prose` | Prose economy: repeated caveats, hedge stacking, abstract bloat, defensive contribution framing |
+| `bib-verifier` | Verifies cite-key validity against OpenAlex with targeted Corbis enrichment and WebSearch fallback |
 | `scribe` | Background documentation of the process |
 | `empiricist` | Empirical analysis (if `--ext empirical`) |
 | `empirics-auditor` | Verifies empirical code and results (if `--ext empirical`) |

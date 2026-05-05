@@ -20,7 +20,21 @@ INTERNAL_KEYS = {
 def format_value(value):
     if isinstance(value, bool):
         return "true" if value else "false"
-    return str(value)
+    if isinstance(value, (int, float)):
+        return str(value)
+    s = str(value)
+    needs_quotes = (
+        "\n" in s
+        or ": " in s
+        or s.strip() != s
+        or s == ""
+        or s.lower() in {"true", "false", "null", "yes", "no", "on", "off"}
+        or s[0] in "-?:{}[],&*#!|>@`"
+    )
+    if not needs_quotes:
+        return s
+    escaped = s.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def split_frontmatter(text):
