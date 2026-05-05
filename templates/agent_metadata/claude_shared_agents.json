@@ -2,7 +2,7 @@
   "bib-verifier": {
     "name": "bib-verifier",
     "description": "Verifies the paper's bibliography against OpenAlex (the deterministic source of truth) with an opportunistic Corbis MCP enrichment pass for finance/econ papers and a WebSearch fallback for SSRN/recent papers. Launched at (a) Stage 5 immediately after the initial paper draft (early-verify pass), (b) Stage 8 after every referee round that changes citations, and (c) Stage 9 as a final one-shot post-polish pass before marking the pipeline complete. Reports VERIFIED / RESOLVED / FABRICATED counts and a fix list; does not edit the bibliography itself.",
-    "tools": "Bash, Read, Write, WebSearch, WebFetch",
+    "tools": "Bash, Read, Write, WebSearch, WebFetch, mcp__corbis__search_papers, mcp__corbis__get_paper_details, mcp__corbis__get_paper_details_batch, mcp__corbis__top_cited_articles, mcp__corbis__literature_search, mcp__corbis__format_citation, mcp__corbis__export_citations, mcp__corbis__find_academic_identity",
     "skills": [
       "bib-verify",
       "corbis"
@@ -38,7 +38,7 @@
   "literature-scout": {
     "name": "literature-scout",
     "description": "Searches the web for relevant papers, surveys existing literature, and builds a literature map. The orchestrator launches this agent at Stage 0 (Problem Discovery).",
-    "tools": "WebSearch, WebFetch, Bash, Read, Write, Glob, Grep",
+    "tools": "WebSearch, WebFetch, Bash, Read, Write, Glob, Grep, mcp__corbis__search_papers, mcp__corbis__get_paper_details, mcp__corbis__get_paper_details_batch, mcp__corbis__top_cited_articles, mcp__corbis__literature_search, mcp__corbis__format_citation, mcp__corbis__export_citations, mcp__corbis__find_academic_identity",
     "skills": [
       "openalex",
       "corbis"
@@ -92,7 +92,7 @@
   "novelty-checker": {
     "name": "novelty-checker",
     "description": "Adversarial novelty verification. The orchestrator launches this agent twice \u2014 at Gate 1b (on the selected idea, before theory development) and at Gate 3 (on the full theory, after math audit). Checks whether the content is genuinely new or a known result repackaged.",
-    "tools": "WebSearch, WebFetch, Bash, Read, Write",
+    "tools": "WebSearch, WebFetch, Bash, Read, Write, mcp__corbis__search_papers, mcp__corbis__get_paper_details, mcp__corbis__get_paper_details_batch, mcp__corbis__top_cited_articles, mcp__corbis__literature_search, mcp__corbis__format_citation, mcp__corbis__export_citations, mcp__corbis__find_academic_identity",
     "skills": [
       "openalex",
       "corbis"
@@ -155,7 +155,7 @@
   "gap-scout": {
     "name": "gap-scout",
     "description": "Deep literature search on a pre-selected gap or theoretical implication. Launched at (a) Stage 0 after the broad scan (gap validation) and (b) Stage 3 once per derived implication (K parallel launches) to lit-check each prediction and tag it NOVEL / PUZZLE-CANDIDATE / SUPPORTED / DEAD. Surveys adjacent literatures, identifies the closest competitor, and maps open questions without pre-specifying a framework.",
-    "tools": "WebSearch, WebFetch, Bash, Read, Write, Glob, Grep",
+    "tools": "WebSearch, WebFetch, Bash, Read, Write, Glob, Grep, mcp__corbis__search_papers, mcp__corbis__get_paper_details, mcp__corbis__get_paper_details_batch, mcp__corbis__top_cited_articles, mcp__corbis__literature_search, mcp__corbis__format_citation, mcp__corbis__export_citations, mcp__corbis__find_academic_identity",
     "skills": [
       "openalex",
       "corbis"
@@ -395,7 +395,7 @@
   "polish-bibliography": {
     "name": "polish-bibliography",
     "description": "Audits the paper's *use* of its bibliography. For every in-text citation, looks up the cited paper (Corbis MCP first for finance/econ, OpenAlex fallback, WebFetch last resort) and verifies the prose claim about it. Scores each citation use FAITHFUL / APPROXIMATE / MISCHARACTERIZED / DECORATIVE. Complements bib-verifier (which checks cite-key validity) and polish-institutions (which catches the egregious cases as part of a broader pass). Stage 9 polish agent. Audit-only: writes proposals to output/polish_bibliography_r{N}.md (where N is the current polish_round); never edits paper/references.bib or paper/sections/.",
-    "tools": "Read, Write, WebSearch, WebFetch, Bash, Glob, Grep",
+    "tools": "Read, Write, WebSearch, WebFetch, Bash, Glob, Grep, mcp__corbis__search_papers, mcp__corbis__get_paper_details, mcp__corbis__get_paper_details_batch, mcp__corbis__top_cited_articles, mcp__corbis__literature_search, mcp__corbis__format_citation, mcp__corbis__export_citations, mcp__corbis__find_academic_identity",
     "skills": [
       "openalex",
       "corbis"

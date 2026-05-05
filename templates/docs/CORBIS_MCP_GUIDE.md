@@ -2,7 +2,7 @@
 
 This project uses the [Corbis](https://www.corbis.ai) MCP server as a domain-specialized literature layer alongside the OpenAlex CLI (`code/utils/openalex/openalex.py`) and WebSearch. Corbis provides hybrid semantic + keyword search over a curated finance/economics corpus, batch full-text fetch, per-journal top-cited rankings, and BibTeX export.
 
-Pipeline behavior degrades gracefully when Corbis is unreachable: agents fall back to OpenAlex + WebSearch and the run still completes.
+Pipeline behavior degrades gracefully when Corbis is unreachable: agents record the failure in shared state, fall back to OpenAlex + WebSearch, and the run still completes.
 
 ---
 
@@ -57,7 +57,7 @@ Restart Gemini after configuring.
 
 ## Available tools
 
-The pipeline's agents call Corbis tools by capability name (resolved via `process_log/corbis_status.json`), not by hard-coded tool names. The list below is what Corbis currently exposes.
+The pipeline's agents call Corbis tools by capability name (resolved via `process_log/corbis_status.json`), not by hard-coded tool names. Autonomous agents expose only the research, citation, and academic-identity tools they need; the broader Corbis server may expose more tools depending on account tier. The list below is what Corbis currently exposes.
 
 **Research and papers**
 
@@ -114,9 +114,22 @@ The pipeline's agents call Corbis tools by capability name (resolved via `proces
 
 ## Tier access and credits
 
-Each Corbis tool call costs **1 credit** regardless of which tool. The pipeline expects roughly 30-50 credits end-to-end, more if bibliography verification and polish-bibliography exercise their Corbis enrichment paths heavily.
+Each Corbis tool call costs **1 credit** regardless of which tool. The pipeline coordinates usage through `process_log/corbis_budget.json` and caches reusable hits in `process_log/corbis_cache.jsonl`. The default autonomous caps are:
 
-If you call a Tier-2 tool on a non-Enterprise plan, you'll receive an access-denied error. Pipeline agents that benefit from Tier-2 (`literature_search`, `query_corbis`, `deep_research`) gracefully fall back to a multi-call Tier-1 sequence when the tool is not exposed.
+| Scope | Budget |
+|---|---:|
+| Stage 0 broad/deep literature | 20 calls total |
+| Gate 1b novelty | 8 calls per candidate (`gate1b_novelty_candidate:<candidate_id>`) |
+| Gate 3 novelty | 10 calls |
+| Stage 3 implication checks | 4 calls per implication (`stage3_implication:<implication_id>`) |
+| Bibliography verification | 15 calls, only after OpenAlex results are known |
+| Polish bibliography | 30 Corbis calls inside the existing 50 combined lookup cap |
+
+The pipeline expects roughly 30-50 credits end-to-end in normal runs, more if novelty and bibliography checks are unusually broad.
+
+Stage disables are tracked in `process_log/corbis_status.json` as both a compatibility marker (`disabled_until`) and a multi-scope list (`disabled_scopes`). Agents should treat any matching current scope, or matching dynamic-scope family such as `stage3_implication:*`, as disabled and use OpenAlex/WebSearch instead.
+
+If you call a Tier-2 tool on a non-Enterprise plan, you'll receive an access-denied error. Autonomous pipeline agents expose `literature_search` as the only Tier-2 Corbis tool and gracefully fall back to a multi-call Tier-1 sequence when it is unavailable. Broader server tools such as `query_corbis` and `deep_research` may exist for manual use, but they are not part of the autonomous agent allowlist.
 
 Verify current limits and pricing at https://www.corbis.ai -> Settings -> Billing; published values can change.
 
@@ -124,7 +137,14 @@ Verify current limits and pricing at https://www.corbis.ai -> Settings -> Billin
 
 ## Example prompts
 
-In a deployed Claude Code session, the autonomous pipeline calls Corbis tools automatically. If you want to test connectivity or run ad-hoc lookups, try:
+In a deployed Claude Code session, the autonomous pipeline calls Corbis tools automatically. If you want to test connectivity or run ad-hoc lookups, first initialize state:
+
+```bash
+python3 code/utils/corbis/preflight.py
+python3 code/utils/corbis/state.py reserve --scope stage0_literature --note "manual smoke test"
+```
+
+Then try:
 
 ```text
 Search for recent papers on intermediary asset pricing in JF/JFE/RFS.
@@ -155,7 +175,11 @@ Format these papers in BibTeX so I can paste them into references.bib.
 
 ### `corbis_status.json` shows `"available": null`
 
-This is expected. The preflight marker cannot see your runtime's OAuth session. Agents will still attempt Corbis tools and fall back gracefully if the runtime has not authenticated yet.
+This is expected at session start. The preflight marker cannot see your runtime's OAuth session. Agents will still attempt Corbis tools when budget allows, then mark success or failure in `corbis_status.json`.
+
+### `corbis_status.json` shows `"disabled_until": "manual_repair_required"`
+
+The local Corbis status or budget file is corrupt. Agents should skip Corbis and fall back to OpenAlex/WebSearch until the corrupt JSON file is repaired or removed and preflight is run again.
 
 ### "401 Unauthorized" mid-run
 
@@ -165,6 +189,7 @@ Your OAuth session may have expired. Re-authenticate in your runtime (`codex mcp
 
 - Corbis allows **200 requests/hour** and **10 concurrent requests** per authenticated user.
 - Wait for the cooldown indicated in the error, or check your credit balance.
+- Mark the failure with `python3 code/utils/corbis/state.py mark-failure --reason rate_limit --stage <scope> --message "429 Rate Limit"` if an agent did not already do so.
 - The pipeline's lit-touching agents are configured to fall back to OpenAlex on rate-limit errors for the remainder of the current stage.
 
 ### Connection timeouts
@@ -183,9 +208,19 @@ claude mcp list
 # Verify Corbis is registered (Codex)
 codex mcp list
 
-# Re-run the preflight marker manually (writes process_log/corbis_status.json)
+# Re-run the preflight marker manually (initializes status/budget/cache)
 python3 code/utils/corbis/preflight.py
 
 # Inspect the latest preflight result
 cat process_log/corbis_status.json
+
+# Inspect the current budget and cache
+cat process_log/corbis_budget.json
+tail -20 process_log/corbis_cache.jsonl
+
+# Reserve one call before a manual MCP call
+python3 code/utils/corbis/state.py reserve --scope stage0_literature --note "manual lookup"
+
+# Cache a reusable paper hit after a manual MCP result
+python3 code/utils/corbis/state.py cache-add --stage stage0_literature --source corbis --title "Paper Title" --doi "10.xxxx/example" --corbis-id "returned-id"
 ```

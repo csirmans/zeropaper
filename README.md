@@ -263,7 +263,7 @@ Each gate is adversarial. Failed theories get revised, reworked, or abandoned. T
 | `sympy` | All runtimes | Symbolic algebra checks for derivatives, signs, simplification, roots, and calibration sanity checks |
 | `codex-math` | All runtimes | OpenAI Codex (gpt-5.5) for proof verification, proof writing, derivation checking, and conjecture exploration |
 | `openalex` | All runtimes | Structured literature queries, DOI/title verification, and citation traversal against OpenAlex |
-| `corbis` | Installed for all runtimes | Domain-specialized finance/economics literature search through Corbis MCP, with OpenAlex/WebSearch fallback. `setup.sh` auto-configures Claude Code via `.mcp.json`; Codex/Gemini users should follow `CORBIS_MCP_GUIDE.md` for MCP setup. |
+| `corbis` | Installed for all runtimes | Domain-specialized finance/economics literature search through Corbis MCP, with shared status/budget/cache files and OpenAlex/WebSearch fallback. `setup.sh` auto-configures Claude Code via `.mcp.json`; Codex/Gemini users should follow `CORBIS_MCP_GUIDE.md` for MCP setup. |
 | `bib-verify` | All runtimes | Deterministic bibliography verification against OpenAlex, with triage output for fixes |
 
 ## Data skills (with `--ext empirical`)
@@ -321,6 +321,8 @@ my-paper/
     └── history.md
 ```
 
+The first runtime preflight also creates `process_log/corbis_status.json`, `process_log/corbis_budget.json`, and `process_log/corbis_cache.jsonl` for Corbis MCP status, budget, and reusable paper hits.
+
 Manual-mode projects omit `dashboard.html`, `process_log/pipeline_state.json`, and the `output/stage*` pipeline subdirectories because there is no autonomous pipeline state to track.
 
 ## Runtime notes
@@ -328,7 +330,7 @@ Manual-mode projects omit `dashboard.html`, `process_log/pipeline_state.json`, a
 - Claude Code: `claude --dangerously-skip-permissions`
 - Codex: `codex --sandbox danger-full-access --ask-for-approval never`
 - Gemini CLI: `gemini --yolo`
-- All runtimes read the same pipeline state and produce the same pipeline artifacts, so you can switch runtimes mid-pipeline. Corbis MCP is the setup-time exception: Claude Code is auto-configured, while Codex and Gemini may need the manual MCP steps in `CORBIS_MCP_GUIDE.md`.
+- All runtimes read the same pipeline state and produce the same pipeline artifacts, so you can switch runtimes mid-pipeline. Corbis MCP is the setup-time exception: Claude Code is auto-configured, while Codex and Gemini may need the manual MCP steps in `CORBIS_MCP_GUIDE.md`. Corbis-aware agents coordinate through `process_log/corbis_status.json`, `process_log/corbis_budget.json`, and `process_log/corbis_cache.jsonl`.
 
 ## Safety
 

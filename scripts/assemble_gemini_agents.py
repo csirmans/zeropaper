@@ -32,6 +32,10 @@ def map_tools(claude_tools_str):
     tools = []
     for t in claude_tools_str.split(","):
         t = t.strip()
+        if t.startswith("mcp__"):
+            # Claude MCP tool allowlists are runtime-specific. Gemini MCP setup
+            # varies by build and is documented in CORBIS_MCP_GUIDE.md instead.
+            continue
         if t in TOOL_MAP:
             tools.append(TOOL_MAP[t])
         else:

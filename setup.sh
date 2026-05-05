@@ -878,8 +878,10 @@ cp "$TEMPLATE_ROOT/templates/utils/openalex/"openalex.py "$P/code/utils/openalex
 chmod +x "$P/code/utils/openalex/"openalex.py
 
 mkdir -p "$P/code/utils/corbis"
+cp "$TEMPLATE_ROOT/templates/utils/corbis/"__init__.py "$P/code/utils/corbis/"
 cp "$TEMPLATE_ROOT/templates/utils/corbis/"preflight.py "$P/code/utils/corbis/"
-chmod +x "$P/code/utils/corbis/"preflight.py
+cp "$TEMPLATE_ROOT/templates/utils/corbis/"state.py "$P/code/utils/corbis/"
+chmod +x "$P/code/utils/corbis/"preflight.py "$P/code/utils/corbis/"state.py
 
 echo "  ✓ Core skills assembled"
 
