@@ -4,8 +4,8 @@
     "mode": "auto-allow",
     "allowUnsandboxedCommands": false,
     "filesystem": {
-      "allowWrite": ["./"],
-      "denyWrite": ["~/.ssh", "~/.aws", "~/.claude", "//etc", "//root"],
+      "allowWrite": ["./", "~/.zeropaper", "~/.claude", "~/.claude.json"],
+      "denyWrite": ["~/.ssh", "~/.aws", "//etc", "//root"],
       "denyRead": ["~/.ssh", "~/.aws", "./.env", ".env"]
     }
   }

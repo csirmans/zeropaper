@@ -368,8 +368,9 @@ Some CLI tools offer full-access or no-prompt modes. Use them only after reviewi
 ## Safety
 
 Claude Code's sandbox is pre-configured in `.claude/settings.json`:
-- Bash restricted to project folder only
+- Bash writes are restricted to the project plus `~/.zeropaper` for WRDS credentials/runtime files and Claude's MCP OAuth cache paths (`~/.claude`, `~/.claude.json`) for Corbis login
 - Cannot read SSH keys or AWS credentials
+- Cannot read the project `.env` by default; prefer `~/.zeropaper/env` for WRDS/FRED/EDGAR/LLM credentials
 - WebSearch and WebFetch work freely (for literature search)
 - `bubblewrap` enforces restrictions at OS level
 

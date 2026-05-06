@@ -20,6 +20,8 @@ Setup is automatic. `setup.sh` wrote `.mcp.json` at the project root pointing at
 2. The first time an agent calls a Corbis tool, Claude Code opens a browser window for OAuth.
 3. Authenticate. Subsequent calls use the cached session.
 
+The generated Claude sandbox allows the local Claude MCP OAuth cache paths (`~/.claude`, `~/.claude.json`) so the Corbis login can persist while still blocking project `.env` reads by default.
+
 Verify the server is registered:
 
 ```bash

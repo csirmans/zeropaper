@@ -1,3 +1,4 @@
+import json
 import importlib.util
 import subprocess
 from pathlib import Path
@@ -84,6 +85,16 @@ def test_host_credentials_are_preferred_over_project_env():
     assert 'load_env_file "$HOME/.zeropaper/env"' in start_services
     assert 'load_env_file ".env" 1' in start_services
     assert "preserve_existing" in start_services
+
+
+def test_claude_sandbox_allows_wrds_and_corbis_auth_paths():
+    settings = json.loads(read(".claude/settings.json"))
+    fs = settings["sandbox"]["filesystem"]
+    assert "~/.zeropaper" in fs["allowWrite"]
+    assert "~/.claude" in fs["allowWrite"]
+    assert "~/.claude.json" in fs["allowWrite"]
+    assert "~/.claude" not in fs["denyWrite"]
+    assert ".env" in fs["denyRead"]
 
 
 def test_gemini_frontmatter_uses_safe_json_quoting():
