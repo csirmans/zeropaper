@@ -42,7 +42,10 @@ done
 
 mkdir -p "$OUTDIR"
 
-SAFE_NAME=$(echo "$QUESTION" | tr ' /:{}\\?.' '_' | cut -c1-60 | tr -cd '[:alnum:]_-')
+BASE_NAME=$(echo "$QUESTION" | tr ' /:{}\\?.' '_' | cut -c1-60 | tr -cd '[:alnum:]_-')
+[ -n "$BASE_NAME" ] || BASE_NAME="explore"
+HASH=$(printf '%s' "$QUESTION::$CONTEXT_FILE" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:10])')
+SAFE_NAME="${BASE_NAME}_${HASH}"
 OUTFILE="${OUTDIR}/${SAFE_NAME}.md"
 TMP="/tmp/codex_explore_${SAFE_NAME}_$$.txt"
 

@@ -113,9 +113,13 @@ touch "$PROJECT_ROOT/code/utils/__init__.py"
 
 mkdir -p "$PROJECT_ROOT/output/stage3a"
 
-ENV_FILE="$PROJECT_ROOT/.env"
-if ! grep -q 'FRED_API_KEY' "$ENV_FILE" 2>/dev/null; then
-    cat >> "$ENV_FILE" <<'ENVEOF'
+ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
+touch "$PROJECT_ROOT/.env" "$ENV_EXAMPLE"
+if ! grep -q 'FRED_API_KEY' "$ENV_EXAMPLE" 2>/dev/null; then
+    cat >> "$ENV_EXAMPLE" <<'ENVEOF'
+
+# Empirical extension credentials.
+# Recommended location for real values: ~/.zeropaper/env
 # FRED API key (free): https://fred.stlouisfed.org/docs/api/api_key.html
 FRED_API_KEY=your-key-here
 

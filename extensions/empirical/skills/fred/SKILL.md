@@ -10,7 +10,7 @@ allowed-tools: Bash, Read, Write, WebFetch
 - FRED: https://fred.stlouisfed.org/
 - API docs: https://fred.stlouisfed.org/docs/api/fred/
 - Requires API key (free): https://fred.stlouisfed.org/docs/api/api_key.html
-- Key goes in `.env` as `FRED_API_KEY=your-key-here`
+- Key is read from `~/.zeropaper/env` first, with project `.env` supported only as a legacy fallback. Set `FRED_API_KEY=your-key-here`; never put real keys in `.env.example`.
 
 ## How to use
 
@@ -20,6 +20,7 @@ allowed-tools: Bash, Read, Write, WebFetch
 from fredapi import Fred
 import os
 from dotenv import load_dotenv
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 fred = Fred(api_key=os.getenv('FRED_API_KEY'))
 data = fred.get_series('GDP')

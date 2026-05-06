@@ -1,6 +1,6 @@
 # Auto AI Research Template
 
-Autonomous research paper generator. Set up a project, launch Claude Code, Codex, or Gemini CLI, walk away. The system discovers a problem, generates a theory, verifies it adversarially, and writes a publication-ready paper.
+Research-paper pipeline scaffold for Claude Code, Codex, and Gemini CLI. It can automate literature search, ideation, theory drafting, empirical analysis, adversarial review, and paper assembly, but the outputs are drafts that require human validation before they become scholarly work.
 
 ## Responsible use — please read before running
 
@@ -20,28 +20,27 @@ By cloning, running, or distributing this repository you accept the terms in [`L
 
 ## Easiest setup (no git or CLI knowledge needed)
 
-If you already have Claude Code installed, open it in any empty folder and paste this in:
+If you already have Claude Code installed, open it in the local `zeropaper` checkout you inspected and paste this in:
 
 ```
 Set up an autonomous finance research project in this folder.
 
-1. Clone https://github.com/alejandroll10/zeropaper into a temp location
-2. From there, run ./setup.sh my-paper --variant finance
+1. Use this local checked-out zeropaper folder as the template source.
+2. Run ./setup.sh my-paper --variant finance
    (or --variant finance --ext empirical if I want CRSP/Compustat data)
-3. Move the resulting my-paper/ folder here
-4. Check that I have the prerequisites installed (python3, uv, git; bubblewrap on Linux).
+3. Check that I have the prerequisites installed (python3, uv, git; bubblewrap on Linux).
    If anything is missing, walk me through installing it on my machine (Mac or Linux).
-5. When setup is done, tell me to cd into my-paper and say "Run the pipeline."
+4. When setup is done, tell me to cd into my-paper and say "Run the pipeline."
 ```
 
-Claude Code will handle the clone, setup, and prereq checks for you. Works on Mac and Linux.
+Claude Code will handle setup and prereq checks for you. Works on Mac and Linux. If you intentionally want setup from a remote repository, use `./setup.sh my-paper --remote-url <url> --remote-ref <commit-or-version-tag>` rather than a moving branch.
 
 ## How it works
 
 1. You clone this template repo once
 2. You run `setup.sh` to create a new project — each run creates an independent project folder with its own git repo
 3. You open the project folder in Claude Code, Codex, or Gemini CLI and say "Run the pipeline"
-4. The pipeline runs autonomously: problem discovery → idea generation → theory development → math verification → paper writing → referee simulation
+4. The pipeline runs the scaffolded workflow: problem discovery → idea generation → theory development → math verification → paper writing → referee simulation. Human review remains mandatory for research judgment, proofs, novelty, empirical design, and submission decisions.
 
 
 ## Prerequisites
@@ -123,7 +122,14 @@ You can create as many projects as you want from the same template.
 
 ```bash
 cd my-paper
-# Edit .env with your API keys (created by setup.sh)
+# Recommended: keep credentials outside the project workspace.
+mkdir -p ~/.zeropaper
+chmod 700 ~/.zeropaper
+nano ~/.zeropaper/env
+
+# Legacy/backwards-compatible option: copy placeholders from .env.example into
+# the project .env created by setup.sh, then fill the values there.
+# This is less isolated because runtimes with workspace read access may inspect it.
 nano .env
 ```
 
@@ -138,21 +144,21 @@ Claude Code:
 
 ```bash
 cd my-paper
-claude --dangerously-skip-permissions
+claude
 ```
 
 Codex:
 
 ```bash
 cd my-paper
-codex --sandbox danger-full-access --ask-for-approval never
+codex --sandbox workspace-write
 ```
 
 Gemini CLI:
 
 ```bash
 cd my-paper
-gemini --yolo
+gemini
 ```
 
 For autonomous projects, say: **"Run the pipeline."** For manual-mode projects, read the runtime doc's agent/skill catalog and invoke the tool you want.
@@ -308,7 +314,8 @@ my-paper/
 ├── CLAUDE.md                 # Claude Code orchestration (assembled by setup.sh)
 ├── AGENTS.md                 # Codex orchestration (assembled by setup.sh)
 ├── GEMINI.md                 # Gemini CLI orchestration (assembled by setup.sh)
-├── .env                      # API keys (gitignored)
+├── .env                      # Optional legacy local credentials (gitignored)
+├── .env.example              # Placeholder keys; real credentials should live in ~/.zeropaper/env
 ├── .mcp.json                 # Claude Code MCP config for Corbis
 ├── CORBIS_MCP_GUIDE.md       # Corbis setup and troubleshooting
 ├── dashboard.html            # Live progress dashboard
@@ -349,10 +356,14 @@ Manual-mode projects omit `dashboard.html`, `process_log/pipeline_state.json`, a
 
 ## Runtime notes
 
-- Claude Code: `claude --dangerously-skip-permissions`
-- Codex: `codex --sandbox danger-full-access --ask-for-approval never`
-- Gemini CLI: `gemini --yolo`
+- Claude Code: `claude`
+- Codex: `codex --sandbox workspace-write`
+- Gemini CLI: `gemini`
 - All runtimes read the same pipeline state and produce the same pipeline artifacts, so you can switch runtimes mid-pipeline. Corbis MCP is the setup-time exception: Claude Code is auto-configured, while Codex and Gemini may need the manual MCP steps in `CORBIS_MCP_GUIDE.md`. Corbis-aware agents coordinate through `process_log/corbis_status.json`, `process_log/corbis_budget.json`, and `process_log/corbis_cache.jsonl`.
+
+### Unsafe opt-in modes
+
+Some CLI tools offer full-access or no-prompt modes. Use them only after reviewing the generated project, confirming `.env` contents, and accepting that agents may read/write broadly within the permissions granted by that runtime. They are not the documented default because empirical projects can contain WRDS credentials, API tokens, unpublished research, and local data-use metadata.
 
 ## Safety
 

@@ -64,3 +64,8 @@ paper/*-SAVE-ERROR
 
 # WRDS server runtime
 code/utils/.wrds_server.pid
+code/utils/.wrds_server.token
+code/utils/wrds_server.log
+
+# Infrastructure refresh backups
+.update_backups/

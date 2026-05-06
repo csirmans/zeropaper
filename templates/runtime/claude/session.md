@@ -21,7 +21,7 @@
 Before Stage 0, check what data sources are available. This prevents bad assumptions from cascading through the entire pipeline.
 
 1. If `code/utils/start_services.sh` exists, run it first to start persistent data connections (WRDS requires Duo auth — wait for it).
-2. Read `.env` and list `{{SKILL_DIR}}/` — check which data skills are installed and which have valid credentials (not placeholders). For services started in step 1, verify they actually respond. Mark ✓ only if the connection works, not just if credentials exist.
+2. Check credential availability without printing secret values: inspect environment-variable presence and, only if permitted by the runtime sandbox, placeholder status in `.env` / `.env.example`; also list `{{SKILL_DIR}}/` to see which data skills are installed. Prefer host-scoped credentials from `~/.zeropaper/env` over project `.env`. For services started in step 1, verify they actually respond. Mark ✓ only if the connection works, not just if credentials exist.
 3. Write results to `output/data_inventory.md` — table of sources, status (✓/✗), what each provides, and implications for research design.
 4. Commit: `pipeline: data inventory complete`
 

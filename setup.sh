@@ -2,8 +2,9 @@
 # Auto AI Research Template — Setup & Launch
 # Usage: ./setup.sh [project-name] [--variant finance|macro] [--mode empirical-first]
 #                  [--ext empirical|theory_llm] [--seed|--manual] [--light] [--local]
+#                  [--remote-url URL --remote-ref REF] [--publish --publish-org ORG]
 #
-# --local   Skip git clone, use templates from this repo directly.
+# --local   Skip production copy/commit flow, use templates from this repo directly.
 #           Outputs to test_output/{variant}/ for inspection.
 # --ext     Add an extension (can be repeated). Available: empirical, theory_llm
 # --mode    Pipeline-architecture mode (orthogonal to --variant). Available:
@@ -19,6 +20,10 @@
 #           pipeline. The runtime doc lists what's available and lets you drive.
 #           Mutually exclusive with --seed.
 # --light   Use sonnet for all subagents (cheaper/faster). Orchestrator model unchanged.
+# --remote-url/--remote-ref
+#           Optional remote template source. Both are required together and the
+#           ref must be a pinned commit SHA or version tag, not a branch name.
+# --publish Publish the generated project to GitHub. Disabled by default.
 #
 # Legacy: --variant finance_llm is shorthand for --variant finance --ext theory_llm
 
@@ -32,9 +37,18 @@ LOCAL=0
 NEXT_IS_VARIANT=0
 NEXT_IS_EXT=0
 NEXT_IS_MODE=0
+NEXT_IS_REMOTE_URL=0
+NEXT_IS_REMOTE_REF=0
+NEXT_IS_PUBLISH_ORG=0
+NEXT_IS_PUBLISH_VISIBILITY=0
 SEEDED=0
 MANUAL=0
 LIGHT=0
+PUBLISH=0
+REMOTE_URL=""
+REMOTE_REF=""
+PUBLISH_ORG=""
+PUBLISH_VISIBILITY="private"
 EXTENSIONS=()
 
 for arg in "$@"; do
@@ -46,6 +60,11 @@ for arg in "$@"; do
         --manual)      MANUAL=1 ;;
         --light)       LIGHT=1 ;;
         --local)       LOCAL=1 ;;
+        --remote-url)  NEXT_IS_REMOTE_URL=1 ;;
+        --remote-ref)  NEXT_IS_REMOTE_REF=1 ;;
+        --publish)     PUBLISH=1 ;;
+        --publish-org) NEXT_IS_PUBLISH_ORG=1 ;;
+        --publish-visibility) NEXT_IS_PUBLISH_VISIBILITY=1 ;;
         --theory-llm)  VARIANT="finance_llm" ;;  # legacy flag
         -*)            echo "Unknown option: $arg"; exit 1 ;;
         *)
@@ -58,6 +77,18 @@ for arg in "$@"; do
             elif [ "$NEXT_IS_MODE" = "1" ]; then
                 MODE="$arg"
                 NEXT_IS_MODE=0
+            elif [ "$NEXT_IS_REMOTE_URL" = "1" ]; then
+                REMOTE_URL="$arg"
+                NEXT_IS_REMOTE_URL=0
+            elif [ "$NEXT_IS_REMOTE_REF" = "1" ]; then
+                REMOTE_REF="$arg"
+                NEXT_IS_REMOTE_REF=0
+            elif [ "$NEXT_IS_PUBLISH_ORG" = "1" ]; then
+                PUBLISH_ORG="$arg"
+                NEXT_IS_PUBLISH_ORG=0
+            elif [ "$NEXT_IS_PUBLISH_VISIBILITY" = "1" ]; then
+                PUBLISH_VISIBILITY="$arg"
+                NEXT_IS_PUBLISH_VISIBILITY=0
             else
                 PROJECT_NAME="$arg"
             fi
@@ -75,6 +106,44 @@ if [ "$NEXT_IS_EXT" = "1" ]; then
 fi
 if [ "$NEXT_IS_MODE" = "1" ]; then
     echo "Error: --mode requires a value (empirical-first)"
+    exit 1
+fi
+if [ "$NEXT_IS_REMOTE_URL" = "1" ]; then
+    echo "Error: --remote-url requires a value"
+    exit 1
+fi
+if [ "$NEXT_IS_REMOTE_REF" = "1" ]; then
+    echo "Error: --remote-ref requires a pinned commit SHA or version tag"
+    exit 1
+fi
+if [ "$NEXT_IS_PUBLISH_ORG" = "1" ]; then
+    echo "Error: --publish-org requires a value"
+    exit 1
+fi
+if [ "$NEXT_IS_PUBLISH_VISIBILITY" = "1" ]; then
+    echo "Error: --publish-visibility requires private, internal, or public"
+    exit 1
+fi
+
+if { [ -n "$REMOTE_URL" ] && [ -z "$REMOTE_REF" ]; } || { [ -z "$REMOTE_URL" ] && [ -n "$REMOTE_REF" ]; }; then
+    echo "Error: --remote-url and --remote-ref must be provided together."
+    echo "Remote setup is intentionally opt-in and must be pinned to a commit SHA or version tag."
+    exit 1
+fi
+if [ -n "$REMOTE_REF" ]; then
+    if printf '%s\n' "$REMOTE_REF" | grep -Eq '^([0-9a-f]{40}|v[0-9]+(\.[0-9]+){1,3}([-+][A-Za-z0-9._-]+)?)$'; then
+        :
+    else
+        echo "Error: --remote-ref must be a full 40-character commit SHA or a version tag like v1.2.3, not a branch name."
+        exit 1
+    fi
+fi
+case "$PUBLISH_VISIBILITY" in
+    private|internal|public) ;;
+    *) echo "Error: --publish-visibility must be private, internal, or public"; exit 1 ;;
+esac
+if [ "$PUBLISH" = "1" ] && [ -z "$PUBLISH_ORG" ]; then
+    echo "Error: --publish requires --publish-org ORG."
     exit 1
 fi
 
@@ -401,13 +470,16 @@ if [ "$LOCAL" = "1" ]; then
     mkdir -p "$OUT_DIR/$GEMINI_DIR_REL"
     cp "$SCRIPT_DIR/$GEMINI_SETTINGS_REL" "$OUT_DIR/$GEMINI_DIR_REL/"
     cp "$SCRIPT_DIR/.gitignore" "$OUT_DIR/"
+    cp "$SCRIPT_DIR/LIMITATIONS.md" "$OUT_DIR/"
     if [ "$MANUAL" = "0" ]; then
         cp "$SCRIPT_DIR/dashboard.html" "$OUT_DIR/"
     fi
 
     echo "Local test mode: $VARIANT → $OUT_DIR"
 else
-    # Production mode — clone, check prereqs, full setup
+    # Production mode — copy the local checked-out template by default, check
+    # prereqs, full setup. Remote setup is opt-in and pinned via
+    # --remote-url/--remote-ref.
     PROJECT_NAME="${PROJECT_NAME:-my-research-paper}"
 
     echo "Checking prerequisites..."
@@ -420,7 +492,7 @@ else
         command -v bwrap >/dev/null 2>&1 || missing+=("bubblewrap (sudo apt-get install bubblewrap)")
     fi
     # Git identity is required: setup.sh runs `git commit` on the new project, and
-    # `set -e` aborts the whole script (skipping the auto-publish step) if commit
+    # `set -e` aborts the whole script if commit
     # fails with "Author identity unknown". Check both global and local config.
     if ! git config --get user.email >/dev/null 2>&1 || ! git config --get user.name >/dev/null 2>&1; then
         missing+=("git identity (run: git config --global user.email \"you@example.com\" && git config --global user.name \"Your Name\")")
@@ -437,10 +509,76 @@ else
         exit 1
     fi
 
-    echo "Cloning template into $PROJECT_NAME..."
-    git clone https://github.com/alejandroll10/zeropaper.git "$PROJECT_NAME"
-    cd "$PROJECT_NAME"
-    git remote remove origin
+    if [ -n "$REMOTE_URL" ]; then
+        echo "Cloning pinned template into $PROJECT_NAME..."
+        git clone "$REMOTE_URL" "$PROJECT_NAME"
+        cd "$PROJECT_NAME"
+        if printf '%s\n' "$REMOTE_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            git checkout --detach "$REMOTE_REF" -q
+            RESOLVED_REF=$(git rev-parse HEAD)
+            if [ "$RESOLVED_REF" != "$REMOTE_REF" ]; then
+                echo "Error: remote commit mismatch after checkout."
+                exit 1
+            fi
+        else
+            TAG_COMMIT=$(git rev-parse --verify --quiet "refs/tags/$REMOTE_REF^{commit}" || true)
+            if [ -z "$TAG_COMMIT" ]; then
+                echo "Error: --remote-ref '$REMOTE_REF' is not a tag in the remote repository."
+                echo "Branches, including version-shaped branch names, are not accepted."
+                exit 1
+            fi
+            git checkout --detach "$TAG_COMMIT" -q
+        fi
+        git remote remove origin
+    else
+        echo "Copying local template into $PROJECT_NAME..."
+        mkdir -p "$PROJECT_NAME"
+        python3 - "$SCRIPT_DIR" "$PROJECT_NAME" <<'PYCOPY'
+import shutil
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1]).resolve()
+dst = Path(sys.argv[2]).resolve()
+skip_names = {
+    ".git",
+    ".env",
+    "tests",
+    "pytest.ini",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "test_output",
+    "test_example",
+    "codex_inspect",
+    "local_testing",
+    "_skill_test_sandbox",
+    "meta_paper",
+    "paper-system",
+}
+
+def should_skip(path: Path) -> bool:
+    if path == dst or dst in path.parents:
+        return True
+    return any(part in skip_names for part in path.relative_to(src).parts)
+
+for child in src.iterdir():
+    if should_skip(child):
+        continue
+    target = dst / child.name
+    if child.is_dir():
+        shutil.copytree(child, target, symlinks=True, ignore=lambda d, names: [
+            name for name in names if should_skip(Path(d) / name)
+        ])
+    else:
+        shutil.copy2(child, target, follow_symlinks=False)
+PYCOPY
+        cd "$PROJECT_NAME"
+        git init -q
+    fi
 
     TEMPLATE_ROOT="."
     OUT_DIR="."
@@ -904,14 +1042,13 @@ fi
 
 echo "  ✓ Project structure created"
 
-# ── Copy .env if available ──
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    cp "$SCRIPT_DIR/.env" "$P/.env"
-    echo "  ✓ .env copied from template repo"
-fi
-
-# ── Ensure .env exists for the existing OpenAlex/FRED/etc. runtime config ──
+# ── Ensure credential files exist without copying template-local secrets ──
 touch "$P/.env"
+cat > "$P/.env.example" <<'ENV_EXAMPLE'
+# Recommended: put real credentials in ~/.zeropaper/env (0600/0700 permissions).
+# Project .env is supported for backwards compatibility but is less isolated.
+ENV_EXAMPLE
+echo "  ✓ Created empty .env and .env.example (template .env is never copied)"
 
 # ── Write Claude MCP config (.mcp.json) — OAuth-first, no project key ──
 cat > "$P/.mcp.json" <<'MCP_JSON_EOF'
@@ -1469,7 +1606,9 @@ candidate_files = [
     ".claude/settings.json",
     ".gemini/settings.json",
     ".gitignore",
+    ".env.example",
     "CORBIS_MCP_GUIDE.md",
+    "LIMITATIONS.md",
     "dashboard.html",
 ]
 
@@ -1590,13 +1729,16 @@ rm -rf templates/
 rm -rf extensions/
 rm -rf meta_paper/
 rm -rf test_scripts/
+rm -rf tests/
 rm -rf scripts/
 rm -rf codex_inspect/
 rm -rf test_output/
+rm -rf docs/superpowers/
 rm -f setup.sh
 rm -f README.md
 rm -f CLAUDE_REFACTOR_PLAN.md
 rm -f requirements.system
+rm -f pytest.ini
 rm -f texput.log
 if [ "$MANUAL" = "1" ]; then
     rm -f dashboard.html
@@ -1610,37 +1752,23 @@ else
     git commit -m "setup: initialized ${VARIANT} variant pipeline" -q
 fi
 
-# ── Optional: auto-publish to a GitHub org if the current user is a member ──
-# Set PUBLISH_ORG=<org> (or leave the default) to opt in. Silently skipped for
-# non-members so other users of this template just get a local repo.
-PUBLISH_ORG="${PUBLISH_ORG:-automated-papers-produced}"
-PUBLISH_VISIBILITY="${PUBLISH_VISIBILITY:-private}"
-# GitHub repo name = <project>-<first 8 chars of ARP_UUID>. The suffix is the
-# same deployment fingerprint baked into paper/arpipeline.sty (and every PDF
-# the pipeline produces), so the repo URL is a 1:1 lookup for the deployment.
-# Always-suffixing eliminates name collisions between unrelated projects that
-# happen to share a project name (e.g., two charlie-2 folders on different hosts).
-PUBLISH_SUFFIX="${ARP_UUID:0:8}"
-# PROJECT_NAME may be an absolute or relative path; GitHub repo names can't
-# contain slashes, so use just the basename for the repo name.
-PUBLISH_NAME="$(basename "$PROJECT_NAME")-${PUBLISH_SUFFIX}"
-if [ -n "$PUBLISH_ORG" ] && command -v gh >/dev/null 2>&1 \
-   && gh auth status >/dev/null 2>&1; then
-    gh_user=$(gh api user --jq .login 2>/dev/null || true)
-    if [ -n "$gh_user" ] \
-       && gh api "orgs/$PUBLISH_ORG/memberships/$gh_user" >/dev/null 2>&1; then
-        echo "Publishing to $PUBLISH_ORG/$PUBLISH_NAME ($PUBLISH_VISIBILITY)..."
-        if gh repo create "$PUBLISH_ORG/$PUBLISH_NAME" \
-               "--$PUBLISH_VISIBILITY" \
-               --source=. --remote=origin --push >/dev/null 2>&1; then
-            echo "  ✓ Pushed to $PUBLISH_ORG/$PUBLISH_NAME"
-            echo "    (deployment fingerprint: $ARP_UUID)"
-        else
-            echo "  ⚠ gh repo create failed. Repo remains local."
-            echo "    (would have published to $PUBLISH_ORG/$PUBLISH_NAME)"
-        fi
+# ── Optional publish. Disabled by default because generated projects may
+# include unpublished drafts, logs, data paths, or data-use metadata.
+if [ "$PUBLISH" = "1" ]; then
+    command -v gh >/dev/null 2>&1 || { echo "Error: --publish requires GitHub CLI (gh)"; exit 1; }
+    gh auth status >/dev/null 2>&1 || { echo "Error: --publish requires an authenticated gh session"; exit 1; }
+    PUBLISH_SUFFIX="${ARP_UUID:0:8}"
+    PUBLISH_NAME="$(basename "$PROJECT_NAME")-${PUBLISH_SUFFIX}"
+    echo "Publishing to $PUBLISH_ORG/$PUBLISH_NAME ($PUBLISH_VISIBILITY)..."
+    echo "  Review reminder: this may include unpublished research artifacts and local metadata."
+    if gh repo create "$PUBLISH_ORG/$PUBLISH_NAME" \
+           "--$PUBLISH_VISIBILITY" \
+           --source=. --remote=origin --push >/dev/null 2>&1; then
+        echo "  ✓ Pushed to $PUBLISH_ORG/$PUBLISH_NAME"
+        echo "    (deployment fingerprint: $ARP_UUID)"
     else
-        echo "  (skipping $PUBLISH_ORG push — not a member)"
+        echo "  ⚠ gh repo create failed. Repo remains local."
+        echo "    (would have published to $PUBLISH_ORG/$PUBLISH_NAME)"
     fi
 fi
 
@@ -1656,13 +1784,13 @@ echo ""
 echo "  cd $PROJECT_NAME"
 echo ""
 echo "Claude:"
-echo "  claude --dangerously-skip-permissions"
+echo "  claude"
 echo ""
 echo "Codex:"
-echo "  codex --sandbox danger-full-access --ask-for-approval never"
+echo "  codex --sandbox workspace-write"
 echo ""
 echo "Gemini:"
-echo "  gemini --yolo"
+echo "  gemini"
 echo ""
 if [ "$MANUAL" = "1" ]; then
     echo "Manual mode — read the runtime doc for the agent and skill catalog, then drive."
@@ -1681,3 +1809,4 @@ if [ "$SEEDED" = "1" ]; then
 fi
 echo "Sandbox is pre-configured in $CLAUDE_SETTINGS_REL"
 echo "(Bash restricted to project folder, web access works freely)"
+echo "Unsafe full-access modes are intentionally not the default; use only after reviewing the risks in README.md."

@@ -50,10 +50,18 @@ def map_model(claude_model, gemini_override=None):
     return MODEL_MAP.get(claude_model, "gemini-3-preview")
 
 
+def yaml_scalar(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(str(value))
+
+
 def render_agent(metadata, body, model_override=None):
     lines = ["---"]
-    lines.append(f'name: {metadata["name"]}')
-    lines.append(f'description: "{metadata["description"]}"')
+    lines.append(f'name: {yaml_scalar(metadata["name"])}')
+    lines.append(f'description: {yaml_scalar(metadata["description"])}')
     lines.append("kind: local")
 
     # Tools
@@ -73,11 +81,11 @@ def render_agent(metadata, body, model_override=None):
         model = map_model(metadata["model"])
     else:
         model = "gemini-3-preview"
-    lines.append(f"model: {model}")
+    lines.append(f"model: {yaml_scalar(model)}")
 
     # max_turns from gemini metadata or default
     max_turns = gemini_meta.get("max_turns", 30)
-    lines.append(f"max_turns: {max_turns}")
+    lines.append(f"max_turns: {yaml_scalar(max_turns)}")
 
     lines.extend(["---", "", body.rstrip(), ""])
     return "\n".join(lines)

@@ -38,11 +38,11 @@ if echo "$INPUT" | grep -qE '^.+:[0-9]+-[0-9]+$'; then
     START=$(echo "$RANGE" | cut -d- -f1)
     END=$(echo "$RANGE" | cut -d- -f2)
     CONTENT=$(sed -n "${START},${END}p" "$FILE")
-    SAFE_NAME="proof_$(basename "$FILE" | tr '.' '_')_${START}_${END}"
+    BASE_NAME="proof_$(basename "$FILE" | tr '.' '_')_${START}_${END}"
 elif [ -f "$INPUT" ]; then
     # File path
     CONTENT=$(cat "$INPUT")
-    SAFE_NAME="proof_$(basename "$INPUT" | tr '.' '_')"
+    BASE_NAME="proof_$(basename "$INPUT" | tr '.' '_')"
 elif [[ "$INPUT" == */*.* ]] || [[ "$INPUT" =~ \.(tex|md|txt|json|py|lean)$ ]]; then
     # Looks like a file path but does not exist — refuse to treat as inline text.
     # A typoed path silently sent as the theorem statement wastes tokens on a
@@ -55,9 +55,12 @@ elif [[ "$INPUT" == */*.* ]] || [[ "$INPUT" =~ \.(tex|md|txt|json|py|lean)$ ]]; 
 else
     # Inline text
     CONTENT="$INPUT"
-    SAFE_NAME="proof_$(echo "$INPUT" | tr ' /:{}\\' '_' | cut -c1-60 | tr -cd '[:alnum:]_-')"
+    BASE_NAME="proof_$(echo "$INPUT" | tr ' /:{}\\' '_' | cut -c1-60 | tr -cd '[:alnum:]_-')"
 fi
 
+[ -n "$BASE_NAME" ] || BASE_NAME="proof"
+HASH=$(printf '%s' "$INPUT::$CONTENT" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:10])')
+SAFE_NAME="${BASE_NAME}_${HASH}"
 OUTFILE="${OUTDIR}/${SAFE_NAME}.md"
 TMP="/tmp/codex_write_${SAFE_NAME}_$$.txt"
 

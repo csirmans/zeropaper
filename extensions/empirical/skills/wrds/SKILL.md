@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Write
 ## Source
 - WRDS: https://wrds-www.wharton.upenn.edu/
 - Python package: `wrds` (pip install wrds)
-- Credentials in `.env` as `WRDS_USER` and `WRDS_PASS`
+- Credentials are read from `~/.zeropaper/env` first, with project `.env` supported only as a legacy fallback. Set `WRDS_USER` and `WRDS_PASS`; never put real credentials in `.env.example`.
 
 ## Connection
 
@@ -54,6 +54,7 @@ If the server isn't available, connect directly — but keep all WRDS queries in
 ```python
 import os
 from dotenv import load_dotenv
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 import wrds
 
@@ -243,7 +244,7 @@ df = db.raw_sql("""
 
 ## Rules
 - **One connection per session.** Duo 2FA fires on each `wrds.Connection()`. Never reconnect unnecessarily.
-- **Credentials only in `.env`.** Never hardcode username/password.
+- **Credentials stay out of tracked files.** Prefer `~/.zeropaper/env`; project `.env` is a legacy fallback. Never hardcode username/password or put real credentials in `.env.example`.
 - **Filter aggressively.** Specify date ranges, shrcd, exchcd, indfmt/datafmt/popsrc/consol filters.
 - **Cache large downloads.** Save to `data/*.parquet` and check before re-querying.
 - **State your sample.** Always report: date range, share code filter, exchange filter, number of firm-months.

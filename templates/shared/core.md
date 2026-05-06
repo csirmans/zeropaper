@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This project autonomously produces a **{{PAPER_TYPE}}** suitable for submission to a {{TARGET_JOURNALS}}. The system runs end-to-end with no human intervention after launch. Quality is enforced by adversarial evaluation at every stage.
+This project runs an autonomous research-assistant workflow for a **{{PAPER_TYPE}}** targeting a {{TARGET_JOURNALS}}. It can draft, test, and revise research artifacts end-to-end, but every output is a draft until a human researcher independently validates the novelty, assumptions, proofs, empirical design, data construction, citations, and submission readiness. Adversarial evaluation improves coverage; it is not a substitute for scholarly judgment.
 
 The project also produces a **process log** documenting how the autonomous system worked, as a pedagogical record.
 

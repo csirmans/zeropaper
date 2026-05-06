@@ -11,6 +11,9 @@ All functions use the persistent WRDS server via wrds_client.
 """
 import os
 import sys
+import json
+import hashlib
+import re
 import numpy as np
 import pandas as pd
 
@@ -18,22 +21,80 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.wrds_client import wrds_query, wrds_start
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'mutual_funds')
+DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+CACHE_VERSION = 2
 
 
 def _ensure_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
 
+def _validate_date(value, name):
+    if value is None:
+        return None
+    if not isinstance(value, str) or not DATE_RE.match(value):
+        raise ValueError(f"{name} must be YYYY-MM-DD or None, got {value!r}")
+    pd.Timestamp(value)  # raises for impossible dates
+    return value
+
+
+def _validate_portnos(portnos):
+    if portnos is None:
+        return None
+    vals = []
+    for p in portnos:
+        try:
+            vals.append(int(p))
+        except (TypeError, ValueError):
+            raise ValueError(f"crsp_portno values must be integers, got {p!r}") from None
+    return sorted(set(vals))
+
+
+def _where_between(column, start, end):
+    clauses = []
+    if start is not None:
+        clauses.append(f"{column} >= '{start}'")
+    if end is not None:
+        clauses.append(f"{column} <= '{end}'")
+    return " AND ".join(clauses) if clauses else "1=1"
+
+
+def _cache_paths(dataset, params):
+    payload = json.dumps({"dataset": dataset, "version": CACHE_VERSION, **params}, sort_keys=True)
+    digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
+    stem = f"{dataset}_{digest}"
+    return (
+        os.path.join(DATA_DIR, f"{stem}.parquet"),
+        os.path.join(DATA_DIR, f"{stem}.metadata.json"),
+    )
+
+
+def _write_cache(df, data_path, meta_path, params):
+    df.to_parquet(data_path)
+    metadata = {
+        "cache_version": CACHE_VERSION,
+        "params": params,
+        "rows": int(len(df)),
+        "columns": list(df.columns),
+    }
+    with open(meta_path, "w") as f:
+        json.dump(metadata, f, indent=2, default=str)
+        f.write("\n")
+
+
 # ── Download functions ──
 
-def download_fund_returns(start='1990-01-01', end='2024-12-31'):
+def download_fund_returns(start='1990-01-01', end=None):
     """Download monthly returns, TNA, NAV for all funds.
 
     Returns:
         DataFrame with crsp_fundno, caldt, mret, mtna, mnav
     """
     _ensure_dir()
-    path = os.path.join(DATA_DIR, 'monthly_returns.parquet')
+    start = _validate_date(start, 'start')
+    end = _validate_date(end, 'end')
+    params = {'start': start, 'end': end}
+    path, meta_path = _cache_paths('monthly_returns', params)
     if os.path.exists(path):
         print(f"  Loading cached {path}")
         return pd.read_parquet(path)
@@ -42,10 +103,10 @@ def download_fund_returns(start='1990-01-01', end='2024-12-31'):
     df = wrds_query(f"""
         SELECT crsp_fundno, caldt, mret, mtna, mnav
         FROM crsp_q_mutualfunds.monthly_tna_ret_nav
-        WHERE caldt BETWEEN '{start}' AND '{end}'
+        WHERE {_where_between('caldt', start, end)}
     """)
     df['caldt'] = pd.to_datetime(df['caldt'])
-    df.to_parquet(path)
+    _write_cache(df, path, meta_path, params)
     print(f"  Saved {path} ({len(df):,} rows)")
     return df
 
@@ -117,19 +178,32 @@ def download_fund_info():
     return {'header': hdr, 'style': sty, 'fees': fees, 'portmap': portmap}
 
 
-def download_fund_holdings(start='2000-01-01', end='2024-12-31', portnos=None):
+def download_fund_holdings(start='2000-01-01', end=None, portnos=None, allow_full=False):
     """Download CRSP mutual fund equity holdings.
 
     Args:
         start: Start date
         end: End date
-        portnos: List of crsp_portno to download (None = all, very large!)
+        portnos: List of crsp_portno to download
+        allow_full: Set True to allow an all-portfolios pull when portnos=None
 
     Returns:
         DataFrame with crsp_portno, report_dt, permno, percent_tna, nbr_shares, market_val
     """
     _ensure_dir()
-    where = f"WHERE report_dt BETWEEN '{start}' AND '{end}'"
+    start = _validate_date(start, 'start')
+    end = _validate_date(end, 'end')
+    portnos = _validate_portnos(portnos)
+    if portnos is None and not allow_full:
+        raise ValueError("download_fund_holdings requires portnos, or allow_full=True for an all-portfolios pull")
+
+    params = {'start': start, 'end': end, 'portnos': portnos, 'allow_full': allow_full}
+    path, meta_path = _cache_paths('holdings', params)
+    if os.path.exists(path):
+        print(f"  Loading cached {path}")
+        return pd.read_parquet(path)
+
+    where = f"WHERE {_where_between('report_dt', start, end)}"
     if portnos is not None:
         portno_str = ','.join(str(p) for p in portnos)
         where += f" AND crsp_portno IN ({portno_str})"
@@ -143,8 +217,7 @@ def download_fund_holdings(start='2000-01-01', end='2024-12-31', portnos=None):
         AND permno IS NOT NULL
     """, timeout=600)
     df['report_dt'] = pd.to_datetime(df['report_dt'])
-    path = os.path.join(DATA_DIR, 'holdings.parquet')
-    df.to_parquet(path)
+    _write_cache(df, path, meta_path, params)
     print(f"  Saved {path} ({len(df):,} rows)")
     return df
 

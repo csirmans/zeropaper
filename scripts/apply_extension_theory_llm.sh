@@ -56,11 +56,13 @@ python3 "$TEMPLATE_ROOT/scripts/assemble_claude_skills.py" \
 
 mkdir -p "$PROJECT_ROOT/output/stage3b"
 
-ENV_FILE="$PROJECT_ROOT/.env"
-if ! grep -q 'UF_API_KEY' "$ENV_FILE" 2>/dev/null; then
-    cat >> "$ENV_FILE" <<'ENVEOF'
+ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
+touch "$PROJECT_ROOT/.env" "$ENV_EXAMPLE"
+if ! grep -q 'UF_API_KEY' "$ENV_EXAMPLE" 2>/dev/null; then
+    cat >> "$ENV_EXAMPLE" <<'ENVEOF'
 
 # LLM experiment backends (set one or both)
+# Recommended location for real values: ~/.zeropaper/env
 # UF NaviGator (free for UF researchers): https://api.ai.it.ufl.edu
 UF_API_KEY=your-key-here
 # DeepInfra (pay-per-token): https://deepinfra.com

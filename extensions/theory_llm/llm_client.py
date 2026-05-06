@@ -5,7 +5,7 @@ LLM client for theory_llm papers. Supports multiple backends:
 
 Setup:
   1. pip install openai python-dotenv
-  2. Create .env with one or both:
+  2. Prefer ~/.zeropaper/env; project .env is a legacy fallback. Set one or both:
      UF_API_KEY=your-key       # https://api.ai.it.ufl.edu
      DEEPINFRA_TOKEN=your-key # https://deepinfra.com
 """
@@ -17,6 +17,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 
 # ── Backend configuration ──
@@ -80,7 +81,7 @@ def _detect_backend(model: Optional[str] = None) -> str:
     if os.getenv("DEEPINFRA_TOKEN"):
         return "deepinfra"
 
-    raise ValueError("No LLM API key found. Set UF_API_KEY or DEEPINFRA_TOKEN in .env")
+    raise ValueError("No LLM API key found. Set UF_API_KEY or DEEPINFRA_TOKEN in ~/.zeropaper/env or project .env")
 
 
 def get_client(backend: Optional[str] = None, model: Optional[str] = None) -> tuple[OpenAI, str]:
@@ -95,7 +96,7 @@ def get_client(backend: Optional[str] = None, model: Optional[str] = None) -> tu
     cfg = BACKENDS[backend]
     api_key = os.getenv(cfg["api_key_env"])
     if not api_key:
-        raise ValueError(f"Missing {cfg['api_key_env']} in .env for backend '{backend}'")
+        raise ValueError(f"Missing {cfg['api_key_env']} in ~/.zeropaper/env or project .env for backend '{backend}'")
 
     client = OpenAI(
         base_url=cfg["base_url"],

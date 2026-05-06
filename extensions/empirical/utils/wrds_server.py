@@ -20,7 +20,8 @@ Usage:
         # Fall back to direct connection
         ...
 
-Server writes its PID to code/utils/.wrds_server.pid for cleanup.
+Server writes host-scoped runtime files to ~/.zeropaper/ so all deployed
+projects on the same host can reuse the authenticated WRDS session.
 """
 import os
 import sys
@@ -28,14 +29,31 @@ import json
 import socket
 import threading
 import signal
+import secrets
 from dotenv import load_dotenv
 
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 
 HOST = '127.0.0.1'
 PORT = 23847  # arbitrary high port
-PID_FILE = os.path.join(os.path.dirname(__file__), '.wrds_server.pid')
+RUNTIME_DIR = os.path.expanduser(os.getenv('ZEROPAPER_RUNTIME_DIR', '~/.zeropaper'))
+PID_FILE = os.path.join(RUNTIME_DIR, 'wrds_server.pid')
+TOKEN_FILE = os.path.join(RUNTIME_DIR, 'wrds_server.token')
 MAX_MSG = 10 * 1024 * 1024  # 10MB max message size
+
+
+def ensure_token():
+    """Create/read the per-host WRDS socket token."""
+    os.makedirs(RUNTIME_DIR, mode=0o700, exist_ok=True)
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE) as f:
+            return f.read().strip()
+    token = secrets.token_urlsafe(32)
+    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(token + '\n')
+    return token
 
 def _safe_raw_sql(db, sql):
     """Run a SQL query, falling back to a manual sqlalchemy path if wrds.raw_sql trips
@@ -87,7 +105,7 @@ def connect_wrds():
     print(f"[wrds_server] Connected to WRDS as {os.getenv('WRDS_USER')}")
     return db
 
-def handle_client(conn, db, lock):
+def handle_client(conn, db, lock, token):
     """Handle a single client query."""
     try:
         # Receive the full message (length-prefixed)
@@ -95,6 +113,12 @@ def handle_client(conn, db, lock):
         if not raw_len:
             return
         msg_len = int(raw_len.decode().strip())
+        if msg_len < 0 or msg_len > MAX_MSG:
+            send_response(conn, {
+                'status': 'error',
+                'msg': f'message too large: {msg_len} bytes (max {MAX_MSG})'
+            })
+            return
 
         chunks = []
         received = 0
@@ -107,9 +131,13 @@ def handle_client(conn, db, lock):
 
         request = json.loads(b''.join(chunks).decode())
         cmd = request.get('cmd', 'query')
+        if request.get('token') != token:
+            response = {'status': 'error', 'msg': 'authentication failed'}
+            send_response(conn, response)
+            return
 
         if cmd == 'ping':
-            response = {'status': 'ok', 'msg': 'wrds_server alive'}
+            response = {'status': 'ok', 'msg': 'wrds_server alive', 'auth': 'token'}
         elif cmd == 'query':
             sql = request['sql']
             with lock:
@@ -159,6 +187,7 @@ def send_response(conn, response):
     conn.sendall(header + data)
 
 def main():
+    os.makedirs(RUNTIME_DIR, mode=0o700, exist_ok=True)
     # Check if already running
     if os.path.exists(PID_FILE):
         with open(PID_FILE) as f:
@@ -169,6 +198,8 @@ def main():
             return
         except OSError:
             pass  # Old process is dead, continue
+
+    token = ensure_token()
 
     # Write PID
     with open(PID_FILE, 'w') as f:
@@ -200,7 +231,7 @@ def main():
     while True:
         try:
             conn, addr = server.accept()
-            t = threading.Thread(target=handle_client, args=(conn, db, lock))
+            t = threading.Thread(target=handle_client, args=(conn, db, lock, token))
             t.daemon = True
             t.start()
         except Exception as e:

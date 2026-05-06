@@ -4,13 +4,15 @@
 # Usage:
 #   ./update.sh <deployed-project-path>
 #   ./update.sh <deployed-project-path> --dry-run
-#   ./update.sh <deployed-project-path> --variant finance --ext empirical
+#   ./update.sh <deployed-project-path> --ext empirical
 #   ./update.sh <deployed-project-path> --seeded --manual --light
 #
-# Overrides (--variant, --ext, --seeded/--no-seeded, --manual/--no-manual,
+# Overrides (--ext, --seeded/--no-seeded, --manual/--no-manual,
 # --light/--no-light) take precedence over the manifest's recorded values
-# AND over sniffed values for pre-manifest deploys. Use them when the
-# manifest is wrong, or when you want to migrate a project across variants.
+# AND over sniffed values for pre-manifest deploys. --variant is accepted only
+# for pre-manifest projects where the variant cannot be sniffed reliably.
+# Manifest-backed projects cannot change variants through update.sh because
+# that requires a full state/docs/artifact migration path.
 # Each --ext repeats; passing --ext replaces the manifest's full extension
 # list (does not append).
 #
@@ -92,7 +94,8 @@ if [ "$NEXT_IS_EXT" = "1" ]; then
 fi
 
 if [ -z "$PROJECT" ]; then
-    echo "usage: update.sh <deployed-project-path> [--dry-run] [--variant X] [--mode M] [--ext Y ...]"
+    echo "usage: update.sh <deployed-project-path> [--dry-run] [--mode M] [--ext Y ...]"
+    echo "       --variant X is accepted only for pre-manifest projects that cannot be sniffed."
     exit 1
 fi
 
@@ -109,9 +112,13 @@ command -v python3 >/dev/null 2>&1 || { echo "update.sh requires python3"; exit 
 # round-trip on update. Currently tracked: variant, mode, extensions, seeded,
 # manual, light. When adding a new setup.sh flag, update both blocks.
 if [ -f "$MANIFEST" ]; then
+    HAS_MANIFEST=1
     VARIANT=$(jq -r .variant "$MANIFEST")
     MODE=$(jq -r '.mode // ""' "$MANIFEST")
-    mapfile -t EXTENSIONS < <(jq -r '.extensions[]?' "$MANIFEST")
+    EXTENSIONS=()
+    while IFS= read -r ext; do
+        [ -n "$ext" ] && EXTENSIONS+=("$ext")
+    done < <(jq -r '.extensions[]?' "$MANIFEST")
     SEEDED=$(jq -r .flags.seeded "$MANIFEST")
     MANUAL=$(jq -r .flags.manual "$MANIFEST")
     LIGHT=$(jq -r .flags.light "$MANIFEST")
@@ -119,6 +126,7 @@ if [ -f "$MANIFEST" ]; then
     mode_str="${MODE:-(none)}"
     echo "Found manifest: variant=$VARIANT, mode=$mode_str, extensions=[${EXTENSIONS[*]}], template=$OLD_VERSION"
 else
+    HAS_MANIFEST=0
     echo "No .deploy_manifest.json — pre-manifest deploy. Sniffing..."
     # Sniff variant from CLAUDE.md
     if grep -q "macroeconomics theory paper" "$PROJECT/CLAUDE.md" 2>/dev/null; then
@@ -136,7 +144,7 @@ else
     MODE=""
     EXTENSIONS=()
     [ -f "$PROJECT/code/utils/wrds_client.py" ] && EXTENSIONS+=("empirical")
-    [ -f "$PROJECT/code/llm_client.py" ] && EXTENSIONS+=("theory_llm")
+    { [ -f "$PROJECT/llm_client.py" ] || [ -f "$PROJECT/code/llm_client.py" ]; } && EXTENSIONS+=("theory_llm")
     [ -d "$PROJECT/output/seed" ] && SEEDED=true || SEEDED=false
     [ ! -d "$PROJECT/output/stage0" ] && [ ! -f "$PROJECT/dashboard.html" ] && MANUAL=true || MANUAL=false
     LIGHT=false
@@ -152,6 +160,12 @@ fi
 # ── Apply explicit overrides (precedence: CLI flag > manifest > sniff) ──
 APPLIED_OVERRIDES=()
 if [ -n "$OVERRIDE_VARIANT" ] && [ "$OVERRIDE_VARIANT" != "$VARIANT" ]; then
+    if [ "$HAS_MANIFEST" = "1" ]; then
+        echo "Error: refusing --variant override on a manifest-backed project."
+        echo "Variant changes need a dedicated migration of state, docs, and artifacts."
+        echo "Create a new deployment or add a purpose-built migration before changing variants."
+        exit 1
+    fi
     APPLIED_OVERRIDES+=("variant: $VARIANT → $OVERRIDE_VARIANT")
     VARIANT="$OVERRIDE_VARIANT"
 fi
@@ -250,13 +264,24 @@ if [ "$DRY_RUN" = "1" ]; then
     echo "=== DRY RUN — would replace ==="
 else
     echo "=== Replacing infrastructure ==="
+    BACKUP_ROOT="$PROJECT/.update_backups/$(date -u +%Y%m%dT%H%M%SZ)"
+    echo "  backups: $BACKUP_ROOT"
 fi
+
+backup_path() {
+    local rel="$1"
+    [ "$DRY_RUN" = "0" ] || return 0
+    [ -e "$PROJECT/$rel" ] || [ -L "$PROJECT/$rel" ] || return 0
+    mkdir -p "$BACKUP_ROOT/$(dirname "$rel")"
+    cp -a "$PROJECT/$rel" "$BACKUP_ROOT/$rel"
+}
 
 while IFS= read -r d; do
     [ -d "$FRESH/$d" ] || continue
     if [ "$DRY_RUN" = "1" ]; then
         echo "  dir : $d"
     else
+        backup_path "$d"
         rm -rf "$PROJECT/$d"
         mkdir -p "$(dirname "$PROJECT/$d")"
         cp -r "$FRESH/$d" "$PROJECT/$d"
@@ -276,6 +301,7 @@ while IFS= read -r f; do
     if [ "$DRY_RUN" = "1" ]; then
         echo "  file: $f"
     else
+        backup_path "$f"
         mkdir -p "$(dirname "$PROJECT/$f")"
         # rm -f handles three cases that cp won't: regular symlinks (cp would
         # follow and overwrite the target, corrupting wherever it points),

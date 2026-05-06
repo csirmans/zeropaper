@@ -234,6 +234,10 @@
     margin-left: 0.5rem;
   }
   .loop-indicator .arrow { font-size: 0.65rem; }
+  .unknown-stage {
+    border-color: var(--orange);
+    color: var(--orange);
+  }
 </style>
 </head>
 <body>
@@ -287,19 +291,87 @@
 const STAGES = [
   { id: 'stage_0', name: 'Stage 0: Problem Discovery', desc: 'Literature search, gap identification', gate: 'Gate 0: Viability' },
   { id: 'stage_1', name: 'Stage 1: Idea Generation', desc: 'Brainstorm mechanisms, iterate with reviewer', gate: 'Gate 1: Idea Review' },
+  { id: 'stage_1_identification_design', name: 'Stage 1: Identification Design', desc: 'Empirical-first identification design', gate: 'Gate 1d: Identification', mode: 'empirical-first' },
   { id: 'stage_2', name: 'Stage 2: Theory Development', desc: 'Full model, proofs, comparative statics', gate: 'Gate 2: Math Audit' },
   { id: 'gate_2',  name: '', desc: '', gate: 'Gate 3: Novelty Check', hidden: true },
+  { id: 'stage_2b', name: 'Stage 2b: Theory Exploration', desc: 'Computational checks, calibration, plots', gate: null, excludeMode: 'empirical-first' },
   { id: 'stage_3', name: 'Stage 3: Implications', desc: 'Testable predictions, special cases', gate: null },
+  { id: 'stage_3a', name: 'Stage 3a: Empirical Analysis', desc: 'Empirical extension analysis and audit', gate: 'Gate 3a: Empirics', extension: 'empirical' },
+  { id: 'stage_3b', name: 'Stage 3b: LLM Experiments', desc: 'Theory-LLM experiments and review', gate: 'Gate 3b: Experiments', extension: 'theory_llm' },
+  { id: 'puzzle_triage', name: 'Puzzle Triage', desc: 'Contradictions between predictions and evidence', gate: null },
   { id: 'stage_4', name: 'Stage 4: Self-Attack', desc: 'Adversarial weakness finding', gate: 'Gate 4: Scorer' },
   { id: 'stage_5', name: 'Stage 5: Paper Writing', desc: 'LaTeX paper from scored theory', gate: null },
   { id: 'stage_6', name: 'Stage 6: Referee Simulation', desc: 'Simulated R1 review', gate: 'Gate 5: Referee' },
   { id: 'stage_7', name: 'Stage 7: Style Check', desc: 'Writing style enforcement', gate: null },
+  { id: 'stage_8', name: 'Stage 8: Bibliography Verify', desc: 'Citation identity and bibliography checks', gate: null },
+  { id: 'stage_9', name: 'Stage 9: Polish', desc: 'Formula, consistency, numerics, prose, bibliography', gate: null },
+  { id: 'stage_10', name: 'Stage 10: Lessons', desc: 'Post-run lessons and process notes', gate: null },
 ];
 
-const STAGE_ORDER = ['seed_triage','stage_0','stage_1','stage_2','gate_2','stage_3','stage_4','stage_5','stage_6','stage_7','complete'];
+const STAGE_ORDER = [
+  'seed_triage',
+  'stage_0',
+  'stage_1',
+  'stage_1_identification_design',
+  'stage_2',
+  'gate_2',
+  'stage_2b',
+  'stage_3',
+  'stage_3a',
+  'stage_3b',
+  'puzzle_triage',
+  'stage_4',
+  'stage_5',
+  'stage_6',
+  'stage_7',
+  'stage_8',
+  'stage_9',
+  'stage_10',
+  'complete'
+];
+
+const STAGE_NAMES = Object.fromEntries(STAGES.map(stage => [stage.id, stage.name]));
+STAGE_NAMES.seed_triage = 'Seed Triage';
+STAGE_NAMES.complete = 'Complete';
+
+function node(tag, attrs = {}, children = []) {
+  const el = document.createElement(tag);
+  Object.entries(attrs).forEach(([key, value]) => {
+    if (key === 'className') el.className = value;
+    else if (key === 'text') el.textContent = value;
+    else el.setAttribute(key, value);
+  });
+  children.forEach(child => el.appendChild(child));
+  return el;
+}
+
+function emptyMessage(text) {
+  const p = node('p', { text });
+  p.style.color = 'var(--text-muted)';
+  p.style.fontSize = '0.85rem';
+  return p;
+}
 
 function stageIndex(id) {
   return STAGE_ORDER.indexOf(id);
+}
+
+function getManifestExtensions(manifest) {
+  return Array.isArray(manifest?.extensions) ? manifest.extensions : [];
+}
+
+function stageApplies(stage, manifest, state) {
+  if (stage.id === state.current_stage) return true;
+  const mode = manifest?.mode || '';
+  const extensions = getManifestExtensions(manifest);
+  if (stage.mode && stage.mode !== mode) return false;
+  if (stage.excludeMode && stage.excludeMode === mode) return false;
+  if (stage.extension && !extensions.includes(stage.extension)) return false;
+  return true;
+}
+
+function visibleStages(manifest, state) {
+  return STAGES.filter(stage => stageApplies(stage, manifest, state));
 }
 
 function scoreColor(val) {
@@ -309,14 +381,33 @@ function scoreColor(val) {
   return 'var(--red)';
 }
 
-function renderPipeline(state) {
+function renderPipeline(state, manifest) {
   const currentIdx = stageIndex(state.current_stage);
   const isComplete = state.status === 'complete';
   const container = document.getElementById('pipeline');
-  container.innerHTML = '';
+  const knownStage = currentIdx >= 0 || isComplete;
+  const stages = visibleStages(manifest, state);
+  const visibleCount = stages.filter(s => !s.hidden).length;
+  container.replaceChildren();
 
-  STAGES.forEach((stage, i) => {
+  if (!knownStage) {
+    const row = node('div', { className: 'stage-row' });
+    const track = node('div', { className: 'stage-track' }, [
+      node('div', { className: 'stage-dot active' })
+    ]);
+    const content = node('div', { className: 'stage-content active unknown-stage' }, [
+      node('div', { className: 'stage-name', text: 'Unknown stage' }),
+      node('div', { className: 'stage-desc', text: `Current stage is not in dashboard schema: ${state.current_stage || '(missing)'}` })
+    ]);
+    row.appendChild(track);
+    row.appendChild(content);
+    container.appendChild(row);
+  }
+
+  let visiblePosition = -1;
+  stages.forEach((stage, i) => {
     if (stage.hidden) return; // skip hidden entries in visual
+    visiblePosition += 1;
 
     const idx = stageIndex(stage.id);
     let dotClass = '';
@@ -339,7 +430,7 @@ function renderPipeline(state) {
     // Track with dot and lines
     const track = document.createElement('div');
     track.className = 'stage-track';
-    if (i > 0) {
+    if (visiblePosition > 0) {
       const lineTop = document.createElement('div');
       lineTop.className = `stage-line ${lineClass || (idx <= currentIdx ? 'done' : '')}`;
       track.appendChild(lineTop);
@@ -347,7 +438,7 @@ function renderPipeline(state) {
     const dot = document.createElement('div');
     dot.className = `stage-dot ${dotClass}`;
     track.appendChild(dot);
-    if (i < STAGES.filter(s => !s.hidden).length - 1) {
+    if (visiblePosition < visibleCount - 1) {
       const lineBot = document.createElement('div');
       lineBot.className = `stage-line ${dotClass === 'done' ? 'done' : ''}`;
       track.appendChild(lineBot);
@@ -363,16 +454,19 @@ function renderPipeline(state) {
 
     // Show loop-back indicator
     if (stage.id === 'stage_0' && state.problem_attempt > 1) {
-      nameEl.innerHTML += `<span class="loop-indicator"><span class="arrow">&#x21bb;</span> attempt ${state.problem_attempt}</span>`;
+      appendLoopIndicator(nameEl, `attempt ${state.problem_attempt}`);
     }
     if (stage.id === 'stage_1' && state.idea_round > 0) {
-      nameEl.innerHTML += `<span class="loop-indicator"><span class="arrow">&#x21bb;</span> round ${state.idea_round}</span>`;
+      appendLoopIndicator(nameEl, `round ${state.idea_round}`);
     }
     if (stage.id === 'stage_2' && state.theory_attempt > 1) {
-      nameEl.innerHTML += `<span class="loop-indicator"><span class="arrow">&#x21bb;</span> theory v${state.theory_attempt}</span>`;
+      appendLoopIndicator(nameEl, `attempt ${state.theory_attempt}`);
+    }
+    if (stage.id === 'stage_2' && state.theory_version > 1) {
+      appendLoopIndicator(nameEl, `theory v${state.theory_version}`);
     }
     if (stage.id === 'stage_2' && state.revision_round > 0) {
-      nameEl.innerHTML += `<span class="loop-indicator"><span class="arrow">&#x21bb;</span> revision ${state.revision_round}</span>`;
+      appendLoopIndicator(nameEl, `revision ${state.revision_round}`);
     }
 
     const descEl = document.createElement('div');
@@ -413,6 +507,13 @@ function renderPipeline(state) {
   });
 }
 
+function appendLoopIndicator(parent, label) {
+  const indicator = node('span', { className: 'loop-indicator' });
+  indicator.appendChild(node('span', { className: 'arrow', text: '\u21bb' }));
+  indicator.appendChild(document.createTextNode(label));
+  parent.appendChild(indicator);
+}
+
 function findGateResult(state, stageId) {
   if (!state.history || state.history.length === 0) return null;
   // Look through history for gate results related to this stage
@@ -450,7 +551,7 @@ function findGateResult(state, stageId) {
 function renderScores(state) {
   const content = document.getElementById('scores-content');
   if (!state.scores || Object.keys(state.scores).length === 0) {
-    content.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No scores yet</p>';
+    content.replaceChildren(emptyMessage('No scores yet'));
     return;
   }
   const dims = [
@@ -460,68 +561,112 @@ function renderScores(state) {
     { key: 'parsimony', label: 'Parsimony', weight: '15%' },
     { key: 'fertility', label: 'Fertility', weight: '10%' },
   ];
-  let html = '';
-  let total = 0;
+  const rows = [];
   let hasScores = false;
   dims.forEach(d => {
     const val = state.scores[d.key];
     if (val !== undefined) {
       hasScores = true;
-      html += `<div class="score-row">
-        <span>${d.label} <span style="color:var(--text-muted)">(${d.weight})</span></span>
-        <div style="display:flex;align-items:center;gap:0.5rem;">
-          <div class="score-bar-container"><div class="score-bar" style="width:${val}%;background:${scoreColor(val)}"></div></div>
-          <span class="score-val" style="color:${scoreColor(val)}">${val}</span>
-        </div>
-      </div>`;
+      rows.push(scoreRow(d.label, d.weight, val));
     }
   });
   if (state.scores.aggregate !== undefined) {
     const agg = state.scores.aggregate;
-    html += `<div class="score-row" style="margin-top:0.5rem;padding-top:0.75rem;border-top:2px solid var(--border);">
-      <span style="font-weight:700;">Aggregate</span>
-      <div style="display:flex;align-items:center;gap:0.5rem;">
-        <div class="score-bar-container"><div class="score-bar" style="width:${agg}%;background:${scoreColor(agg)}"></div></div>
-        <span class="score-val" style="color:${scoreColor(agg)};font-size:1rem;">${agg}</span>
-      </div>
-    </div>`;
+    const row = scoreRow('Aggregate', null, agg);
+    row.style.marginTop = '0.5rem';
+    row.style.paddingTop = '0.75rem';
+    row.style.borderTop = '2px solid var(--border)';
+    row.firstChild.style.fontWeight = '700';
+    rows.push(row);
   }
   if (state.scores.decision) {
-    html += `<div style="margin-top:0.75rem;text-align:center;">
-      <span class="status-badge" style="font-size:0.8rem;
-        ${state.scores.decision === 'ADVANCE' ? 'background:#23883033;color:var(--green);border:1px solid var(--green)' :
-          state.scores.decision === 'REVISE' ? 'background:#d2992233;color:var(--yellow);border:1px solid var(--yellow)' :
-          'background:#f8514933;color:var(--red);border:1px solid var(--red)'}
-      ">${state.scores.decision}</span>
-    </div>`;
+    rows.push(decisionBadge(state.scores.decision));
   }
-  content.innerHTML = hasScores ? html : '<p style="color:var(--text-muted);font-size:0.85rem;">No scores yet</p>';
+  content.replaceChildren(...(hasScores ? rows : [emptyMessage('No scores yet')]));
+}
+
+function boundedScore(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(100, num));
+}
+
+function scoreRow(label, weight, value) {
+  const row = node('div', { className: 'score-row' });
+  const labelEl = node('span', { text: label });
+  if (weight) {
+    const weightEl = node('span', { text: ` (${weight})` });
+    weightEl.style.color = 'var(--text-muted)';
+    labelEl.appendChild(weightEl);
+  }
+  const valueWrap = node('div');
+  valueWrap.style.display = 'flex';
+  valueWrap.style.alignItems = 'center';
+  valueWrap.style.gap = '0.5rem';
+  const barContainer = node('div', { className: 'score-bar-container' });
+  const bar = node('div', { className: 'score-bar' });
+  const bounded = boundedScore(value);
+  bar.style.width = `${bounded}%`;
+  bar.style.background = scoreColor(bounded);
+  const val = node('span', { className: 'score-val', text: String(value) });
+  val.style.color = scoreColor(bounded);
+  barContainer.appendChild(bar);
+  valueWrap.appendChild(barContainer);
+  valueWrap.appendChild(val);
+  row.appendChild(labelEl);
+  row.appendChild(valueWrap);
+  return row;
+}
+
+function decisionBadge(decision) {
+  const wrap = node('div');
+  wrap.style.marginTop = '0.75rem';
+  wrap.style.textAlign = 'center';
+  const badge = node('span', { className: 'status-badge', text: String(decision) });
+  badge.style.fontSize = '0.8rem';
+  if (decision === 'ADVANCE') {
+    badge.style.background = '#23883033';
+    badge.style.color = 'var(--green)';
+    badge.style.border = '1px solid var(--green)';
+  } else if (decision === 'REVISE') {
+    badge.style.background = '#d2992233';
+    badge.style.color = 'var(--yellow)';
+    badge.style.border = '1px solid var(--yellow)';
+  } else {
+    badge.style.background = '#f8514933';
+    badge.style.color = 'var(--red)';
+    badge.style.border = '1px solid var(--red)';
+  }
+  wrap.appendChild(badge);
+  return wrap;
 }
 
 function renderHistory(state) {
   const content = document.getElementById('history-content');
   if (!state.history || state.history.length === 0) {
-    content.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No events yet</p>';
+    content.replaceChildren(emptyMessage('No events yet'));
     return;
   }
-  let html = '';
   // Show most recent first, max 15
   const items = state.history.slice(-15).reverse();
+  const rows = [];
   items.forEach(h => {
     const time = h.timestamp || h.time || '';
     const event = h.event || h.action || h.message || JSON.stringify(h);
-    html += `<div class="history-item">
-      <span class="history-time">${time}</span>
-      <span class="history-event">${event}</span>
-    </div>`;
+    rows.push(node('div', { className: 'history-item' }, [
+      node('span', { className: 'history-time', text: String(time) }),
+      node('span', { className: 'history-event', text: String(event) })
+    ]));
   });
-  content.innerHTML = html;
+  content.replaceChildren(...rows);
 }
 
 function renderStatus(state) {
   const badge = document.getElementById('status-badge');
-  badge.className = `status-badge status-${state.status}`;
-  badge.textContent = state.status.replace('_', ' ');
+  const status = String(state.status || 'unknown');
+  const safeStatus = status.replace(/[^a-zA-Z0-9_-]/g, '_');
+  badge.className = `status-badge status-${safeStatus}`;
+  badge.textContent = status.replace('_', ' ');
 
   const label = document.getElementById('current-stage-label');
   if (state.status === 'complete') {
@@ -530,34 +675,30 @@ function renderStatus(state) {
     label.textContent = 'Waiting to start';
   } else {
     const stageNames = {
-      seed_triage: 'Seed Triage',
-      stage_0: 'Problem Discovery',
-      stage_1: 'Idea Generation',
-      stage_2: 'Theory Development',
-      stage_3: 'Implications',
-      stage_4: 'Self-Attack & Scoring',
-      stage_5: 'Paper Writing',
-      stage_6: 'Referee Simulation',
-      stage_7: 'Style Check',
+      ...STAGE_NAMES,
     };
-    label.textContent = stageNames[state.current_stage] || state.current_stage;
+    label.textContent = stageNames[state.current_stage] || `Unknown stage: ${state.current_stage}`;
   }
 
   document.getElementById('c-problem').textContent = state.problem_attempt || 0;
   document.getElementById('c-idea').textContent = state.idea_round || 0;
-  document.getElementById('c-theory').textContent = state.theory_attempt || 0;
+  document.getElementById('c-theory').textContent = state.theory_version || state.theory_attempt || 0;
   document.getElementById('c-revision').textContent = state.revision_round || 0;
   document.getElementById('c-referee').textContent = state.referee_round || 0;
 }
 
 async function loadState() {
   try {
-    const resp = await fetch('process_log/pipeline_state.json?t=' + Date.now());
+    const cacheBust = Date.now();
+    const resp = await fetch('process_log/pipeline_state.json?t=' + cacheBust);
     if (!resp.ok) throw new Error('Could not load pipeline_state.json');
     const state = await resp.json();
+    const manifest = await fetch('.deploy_manifest.json?t=' + cacheBust)
+      .then(r => r.ok ? r.json() : null)
+      .catch(() => null);
     document.getElementById('error-banner').style.display = 'none';
     renderStatus(state);
-    renderPipeline(state);
+    renderPipeline(state, manifest);
     renderScores(state);
     renderHistory(state);
   } catch (e) {

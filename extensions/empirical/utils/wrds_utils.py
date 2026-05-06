@@ -10,12 +10,43 @@ until all WRDS work is done.
 All functions read WRDS_USER and WRDS_PASS from .env.
 """
 import os
+import re
 import pandas as pd
 from dotenv import load_dotenv
 
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 
 _DB = None
+DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _validate_date(value, name):
+    if value is None:
+        return None
+    if not isinstance(value, str) or not DATE_RE.match(value):
+        raise ValueError(f"{name} must be YYYY-MM-DD or None, got {value!r}")
+    pd.Timestamp(value)
+    return value
+
+
+def _validate_int_sequence(values, name):
+    cleaned = []
+    for value in values:
+        try:
+            cleaned.append(int(value))
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} values must be integers, got {value!r}") from None
+    return tuple(cleaned)
+
+
+def _where_between(column, start, end):
+    clauses = []
+    if start is not None:
+        clauses.append(f"{column} >= '{start}'")
+    if end is not None:
+        clauses.append(f"{column} <= '{end}'")
+    return " AND ".join(clauses) if clauses else "1=1"
 
 def get_wrds():
     """Get or create persistent WRDS connection.
@@ -78,20 +109,22 @@ def query(sql):
     """
     return _safe_raw_sql(get_wrds(), sql)
 
-def crsp_monthly(start='1963-07-01', end='2024-12-31', shrcd=(10, 11), exchcd=(1, 2, 3)):
+def crsp_monthly(start='1963-07-01', end=None, shrcd=(10, 11), exchcd=(1, 2, 3)):
     """Download CRSP monthly stock file with market cap.
 
     Args:
         start: Start date (default '1963-07-01')
-        end: End date (default '2024-12-31')
+        end: End date (default None, latest available)
         shrcd: Share codes to include (default ordinary common shares)
         exchcd: Exchange codes (default NYSE, AMEX, NASDAQ)
 
     Returns:
         DataFrame with permno, date, ret, prc, shrout, mktcap, shrcd, exchcd, siccd
     """
-    shrcd_str = ','.join(str(s) for s in shrcd)
-    exchcd_str = ','.join(str(e) for e in exchcd)
+    start = _validate_date(start, 'start')
+    end = _validate_date(end, 'end')
+    shrcd_str = ','.join(str(s) for s in _validate_int_sequence(shrcd, 'shrcd'))
+    exchcd_str = ','.join(str(e) for e in _validate_int_sequence(exchcd, 'exchcd'))
     return query(f"""
         SELECT a.permno, a.date, a.ret, a.prc, a.shrout,
                ABS(a.prc) * a.shrout AS mktcap,
@@ -100,12 +133,12 @@ def crsp_monthly(start='1963-07-01', end='2024-12-31', shrcd=(10, 11), exchcd=(1
         JOIN crsp.msenames AS b
           ON a.permno = b.permno
           AND a.date BETWEEN b.namedt AND b.nameendt
-        WHERE a.date BETWEEN '{start}' AND '{end}'
+        WHERE {_where_between('a.date', start, end)}
           AND b.shrcd IN ({shrcd_str})
           AND b.exchcd IN ({exchcd_str})
     """)
 
-def compustat_annual(start='1963-01-01', end='2024-12-31'):
+def compustat_annual(start='1963-01-01', end=None):
     """Download Compustat annual fundamentals.
 
     Args:
@@ -115,13 +148,15 @@ def compustat_annual(start='1963-01-01', end='2024-12-31'):
     Returns:
         DataFrame with gvkey, datadate, fyear, and common accounting items
     """
+    start = _validate_date(start, 'start')
+    end = _validate_date(end, 'end')
     return query(f"""
         SELECT gvkey, datadate, fyear, at, sale, ni, ceq, csho, prcc_f,
                lt, dltt, che, dp, oibdp, xrd, capx, ebitda
         FROM comp.funda
         WHERE indfmt = 'INDL' AND datafmt = 'STD'
           AND popsrc = 'D' AND consol = 'C'
-          AND datadate BETWEEN '{start}' AND '{end}'
+          AND {_where_between('datadate', start, end)}
     """)
 
 def ccm_link():
@@ -140,7 +175,7 @@ def ccm_link():
     df['linkdt'] = pd.to_datetime(df['linkdt'])
     return df
 
-def market_index(start='1963-07-01', end='2024-12-31', freq='monthly'):
+def market_index(start='1963-07-01', end=None, freq='monthly'):
     """Download CRSP market index returns.
 
     Args:
@@ -151,11 +186,15 @@ def market_index(start='1963-07-01', end='2024-12-31', freq='monthly'):
     Returns:
         DataFrame with date, vwretd, ewretd, sprtrn
     """
+    start = _validate_date(start, 'start')
+    end = _validate_date(end, 'end')
+    if freq not in {'monthly', 'daily'}:
+        raise ValueError("freq must be 'monthly' or 'daily'")
     table = 'crsp.msi' if freq == 'monthly' else 'crsp.dsi'
     return query(f"""
         SELECT date, vwretd, ewretd, sprtrn
         FROM {table}
-        WHERE date BETWEEN '{start}' AND '{end}'
+        WHERE {_where_between('date', start, end)}
     """)
 
 def close():

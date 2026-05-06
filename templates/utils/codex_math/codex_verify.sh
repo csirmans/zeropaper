@@ -23,8 +23,11 @@ OUTDIR="${4:-./output/codex_audits}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$OUTDIR"
 
-# Sanitize pattern for filename
-SAFE_NAME=$(echo "$PATTERN" | tr ' /:{}\\' '_' | tr -cd '[:alnum:]_-')
+# Sanitize pattern for filename and append a content hash to avoid collisions.
+BASE_NAME=$(echo "$PATTERN" | tr ' /:{}\\' '_' | tr -cd '[:alnum:]_-' | cut -c1-60)
+[ -n "$BASE_NAME" ] || BASE_NAME="verify"
+HASH=$(printf '%s' "$FILE::$PATTERN" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:10])')
+SAFE_NAME="${BASE_NAME}_${HASH}"
 OUTFILE="${OUTDIR}/${SAFE_NAME}.md"
 TMP="/tmp/codex_verify_${SAFE_NAME}_$$.txt"
 
@@ -62,8 +65,10 @@ If a step is correct, show why it follows. If a step is wrong, give a specific c
 $CONTENT
 ---
 
-Report format:
-## Verdict: PASS or FAIL
+Report format (the first heading must be exactly one of the next two lines, with no extra text):
+## Verdict: PASS
+or
+## Verdict: FAIL
 ## Step-by-step verification
 [numbered steps, each with PASS/FAIL]
 ## Errors found (if any)
@@ -81,9 +86,11 @@ if [ -f "$TMP" ]; then
         echo ""
         cat "$TMP"
     } > "$OUTFILE"
+    VERDICT=$(sed -nE 's/^##[[:space:]]*Verdict:[[:space:]]*(PASS|FAIL)[[:space:]]*$/\1/p' "$TMP" | head -1)
+    [ -n "$VERDICT" ] || VERDICT="UNKNOWN"
     echo ""
     echo "[codex-math] Result saved to: $OUTFILE"
-    echo "[codex-math] Verdict: $(grep -oE 'PASS|FAIL' "$TMP" | head -1 || echo 'UNKNOWN')"
+    echo "[codex-math] Verdict: $VERDICT"
 else
     echo "WARNING: No output file produced" >&2
     exit 1

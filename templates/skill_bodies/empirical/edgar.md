@@ -2,7 +2,7 @@
 - SEC EDGAR: https://www.sec.gov/cgi-bin/browse-edgar
 - Direct API: https://data.sec.gov (no auth, just User-Agent header)
 - Python package: `edgartools` (pip install edgartools) — no API key, just name+email
-- Credentials in `.env` as `SEC_EDGAR_NAME` and `SEC_EDGAR_EMAIL`
+- EDGAR identity is read from `~/.zeropaper/env` first, with project `.env` supported only as a legacy fallback. Set `SEC_EDGAR_NAME` and `SEC_EDGAR_EMAIL`; never put real identity values in `.env.example`.
 
 ## Setup
 
@@ -10,6 +10,7 @@
 from edgar import *
 import os
 from dotenv import load_dotenv
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 
 name = os.getenv('SEC_EDGAR_NAME', 'Research')
@@ -165,7 +166,7 @@ for f in form4s:
 - **Use XBRL for cross-company comparisons.** Filing text varies; XBRL facts are standardized.
 
 ## Rules
-- **Credentials only in `.env`.** Never hardcode name/email.
+- **Credentials stay out of tracked files.** Prefer `~/.zeropaper/env`; project `.env` is a legacy fallback. Never hardcode name/email or put real values in `.env.example`.
 - **Respect rate limits.** 10 req/sec max for SEC API.
 - **Cache aggressively.** Save to `data/*.parquet` and check before re-downloading.
 - **State your sample.** Always report: date range, filing type, number of firms, any filters applied.

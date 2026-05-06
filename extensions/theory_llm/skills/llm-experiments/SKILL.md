@@ -16,7 +16,7 @@ allowed-tools: Bash, Read, Write
 ```python
 from llm_client import call, list_models
 
-# Auto-detect backend (uses whichever key is in .env)
+# Auto-detect backend (uses whichever key is configured)
 r = call(
     system="You are a financial analyst.",
     user="Estimate the fair value of a company with $10M revenue growing 20% annually.",
@@ -65,7 +65,7 @@ print(list_models())
 | `meta-llama/Meta-Llama-3.1-8B-Instruct` | DeepInfra | Fast, cheap |
 
 ## Credentials
-In `.env`:
+Preferred location is `~/.zeropaper/env`; project `.env` is supported only as a legacy fallback. Set one or both:
 ```
 UF_API_KEY=your-key          # UF NaviGator
 DEEPINFRA_TOKEN=your-key     # DeepInfra

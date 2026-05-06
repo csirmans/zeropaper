@@ -9,6 +9,7 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 
 _FRED = None
@@ -43,7 +44,7 @@ def get_series(series_id, start=None, end=None):
         kwargs['observation_end'] = end
     return get_fred().get_series(series_id, **kwargs)
 
-def macro_moments(start='1947-01-01', end='2024-12-31'):
+def macro_moments(start='1947-01-01', end=None):
     """Compute standard macro moments used in calibration.
 
     Returns:

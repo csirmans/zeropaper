@@ -6,7 +6,7 @@
     "filesystem": {
       "allowWrite": ["./"],
       "denyWrite": ["~/.ssh", "~/.aws", "~/.claude", "//etc", "//root"],
-      "denyRead": ["~/.ssh", "~/.aws"]
+      "denyRead": ["~/.ssh", "~/.aws", "./.env", ".env"]
     }
   }
 }

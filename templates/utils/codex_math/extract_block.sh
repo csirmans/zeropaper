@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Extract a mathematical block (proposition, theorem, lemma, proof, etc.) from a file.
-# Works with LaTeX (.tex) and Markdown (.md).
+# Uses literal pattern matching by default so labels containing regex metacharacters
+# do not misfire.
 #
 # Usage:
 #   extract_block.sh <file> <pattern> [context_lines]
@@ -10,14 +11,6 @@
 #   extract_block.sh paper/model.tex "prop:crra_linear"
 #   extract_block.sh paper/model.tex "Characterization" 30
 #   extract_block.sh notes.md "Proposition 3"
-#
-# Output:
-#   === CONTEXT (lines X-Y) ===
-#   [definitions and notation before the block]
-#   === BLOCK (lines A-B) ===
-#   [the proposition/theorem + proof]
-#
-# The script auto-detects LaTeX vs Markdown by file extension.
 
 set -euo pipefail
 
@@ -25,129 +18,103 @@ FILE="${1:?Usage: extract_block.sh <file> <pattern> [context_lines]}"
 PATTERN="${2:?Usage: extract_block.sh <file> <pattern> [context_lines]}"
 CONTEXT_LINES="${3:-20}"
 
-if [ ! -f "$FILE" ]; then
-    echo "ERROR: File not found: $FILE" >&2
-    exit 1
-fi
+python3 - "$FILE" "$PATTERN" "$CONTEXT_LINES" <<'PYEOF'
+import re
+import sys
+from pathlib import Path
 
-TOTAL=$(wc -l < "$FILE")
+path = Path(sys.argv[1])
+pattern = sys.argv[2]
+try:
+    context_lines = int(sys.argv[3])
+except ValueError:
+    raise SystemExit("ERROR: context_lines must be an integer")
 
-# Find the line containing the pattern
-MATCH_LINE=$(grep -n "$PATTERN" "$FILE" | head -1 | cut -d: -f1)
-if [ -z "$MATCH_LINE" ]; then
-    echo "ERROR: Pattern '$PATTERN' not found in $FILE" >&2
-    exit 1
-fi
+if not path.is_file():
+    raise SystemExit(f"ERROR: File not found: {path}")
 
-# Detect file type
-EXT="${FILE##*.}"
+lines = path.read_text(errors="replace").splitlines()
+match_idx = next((i for i, line in enumerate(lines) if pattern in line), None)
+if match_idx is None:
+    raise SystemExit(f"ERROR: Pattern {pattern!r} not found in {path}")
 
-if [ "$EXT" = "tex" ]; then
-    # === LaTeX mode ===
+ext = path.suffix.lower().lstrip(".")
+total = len(lines)
 
-    # Search backward for the nearest \begin{proposition|theorem|lemma|corollary|remark|definition}
-    BLOCK_START="$MATCH_LINE"
-    for i in $(seq "$MATCH_LINE" -1 1); do
-        if sed -n "${i}p" "$FILE" | grep -qE '\\begin\{(proposition|theorem|lemma|corollary|remark|definition|assumption)\}'; then
-            BLOCK_START="$i"
+if ext == "tex":
+    begin_re = re.compile(r"\\begin\{(proposition|theorem|lemma|corollary|remark|definition|assumption)\}")
+    next_begin_re = re.compile(r"\\begin\{(proposition|theorem|lemma)\}")
+    end_re = re.compile(r"\\end\{(proposition|theorem|lemma|corollary|remark|definition|assumption)\}")
+
+    block_start = match_idx
+    for i in range(match_idx, -1, -1):
+        if begin_re.search(lines[i]):
+            block_start = i
             break
-        fi
-    done
 
-    # Search forward for the end: \end{proof} preferred, else \end{proposition|theorem|...}
-    # We look for the FIRST \end{proof} after the match line. If none, look for \end{proposition} etc.
-    BLOCK_END="$TOTAL"
-    FOUND_END=0
-    for i in $(seq "$MATCH_LINE" "$TOTAL"); do
-        LINE=$(sed -n "${i}p" "$FILE")
-        if echo "$LINE" | grep -qE '\\end\{proof\}'; then
-            BLOCK_END="$i"
-            FOUND_END=1
+    block_end = total - 1
+    found_end = False
+    for i in range(match_idx, total):
+        line = lines[i]
+        if r"\end{proof}" in line:
+            block_end = i
+            found_end = True
             break
-        fi
-        # Stop if we hit another \begin{proposition|theorem} (next result started)
-        if [ "$i" -gt "$((MATCH_LINE + 2))" ] && echo "$LINE" | grep -qE '\\begin\{(proposition|theorem|lemma)\}'; then
-            # Back up to the previous \end{...}
-            for j in $(seq "$((i - 1))" -1 "$MATCH_LINE"); do
-                if sed -n "${j}p" "$FILE" | grep -qE '\\end\{'; then
-                    BLOCK_END="$j"
-                    FOUND_END=1
+        if i > match_idx + 2 and next_begin_re.search(line):
+            for j in range(i - 1, match_idx - 1, -1):
+                if r"\end{" in lines[j]:
+                    block_end = j
+                    found_end = True
                     break
-                fi
-            done
             break
-        fi
-    done
 
-    # If no \end{proof} found within 200 lines, cap it
-    if [ "$FOUND_END" -eq 0 ] || [ "$((BLOCK_END - BLOCK_START))" -gt 200 ]; then
-        # Look for any \end{} within 200 lines
-        for i in $(seq "$MATCH_LINE" "$((MATCH_LINE + 200))"); do
-            [ "$i" -gt "$TOTAL" ] && break
-            if sed -n "${i}p" "$FILE" | grep -qE '\\end\{(proposition|theorem|lemma|corollary|remark|definition)\}'; then
-                BLOCK_END="$i"
+    if not found_end or block_end - block_start > 200:
+        cap = min(total, match_idx + 201)
+        for i in range(match_idx, cap):
+            if end_re.search(lines[i]):
+                block_end = i
                 break
-            fi
-        done
-    fi
 
-    # Also grab referenced equations for context
-    REFS=$(sed -n "${BLOCK_START},${BLOCK_END}p" "$FILE" | grep -oE 'eq:[a-zA-Z_]+' | sort -u 2>/dev/null || true)
-
-else
-    # === Markdown mode ===
-
-    # Search backward for ## or ### or **Proposition** etc.
-    BLOCK_START="$MATCH_LINE"
-    for i in $(seq "$MATCH_LINE" -1 1); do
-        LINE=$(sed -n "${i}p" "$FILE")
-        if echo "$LINE" | grep -qE '^#{1,3} |^\*\*(Proposition|Theorem|Lemma|Corollary|Definition)'; then
-            BLOCK_START="$i"
+    refs = sorted(set(re.findall(r"eq:[A-Za-z_][A-Za-z0-9_:-]*", "\n".join(lines[block_start:block_end + 1]))))
+else:
+    heading_re = re.compile(r"^#{1,3} |^\*\*(Proposition|Theorem|Lemma|Corollary|Definition)")
+    block_start = match_idx
+    for i in range(match_idx, -1, -1):
+        if heading_re.search(lines[i]):
+            block_start = i
             break
-        fi
-    done
 
-    # Search forward for the next heading or end of section
-    BLOCK_END="$TOTAL"
-    for i in $(seq "$((MATCH_LINE + 1))" "$TOTAL"); do
-        LINE=$(sed -n "${i}p" "$FILE")
-        if echo "$LINE" | grep -qE '^#{1,3} |^---$'; then
-            BLOCK_END="$((i - 1))"
+    block_end = total - 1
+    for i in range(match_idx + 1, total):
+        if re.search(r"^#{1,3} |^---$", lines[i]):
+            block_end = i - 1
             break
-        fi
-    done
+    refs = []
 
-    REFS=""
-fi
+ctx_start = max(0, block_start - context_lines)
 
-# Compute context range
-CTX_START="$((BLOCK_START - CONTEXT_LINES))"
-[ "$CTX_START" -lt 1 ] && CTX_START=1
+def emit_range(start, end):
+    for line in lines[start:end + 1]:
+        print(line)
 
-# Output
-echo "=== CONTEXT (lines ${CTX_START}-$((BLOCK_START - 1))) ==="
-if [ "$CTX_START" -lt "$BLOCK_START" ]; then
-    sed -n "${CTX_START},$((BLOCK_START - 1))p" "$FILE"
-fi
+print(f"=== CONTEXT (lines {ctx_start + 1}-{block_start}) ===")
+if ctx_start < block_start:
+    emit_range(ctx_start, block_start - 1)
 
-echo ""
-echo "=== BLOCK (lines ${BLOCK_START}-${BLOCK_END}) ==="
-sed -n "${BLOCK_START},${BLOCK_END}p" "$FILE"
+print()
+print(f"=== BLOCK (lines {block_start + 1}-{block_end + 1}) ===")
+emit_range(block_start, block_end)
 
-# Append referenced equations if any
-if [ -n "$REFS" ]; then
-    echo ""
-    echo "=== REFERENCED EQUATIONS ==="
-    for ref in $REFS; do
-        REFLINE=$(grep -n "label{${ref}}" "$FILE" | head -1 | cut -d: -f1)
-        if [ -n "$REFLINE" ]; then
-            # Print 3 lines around the label
-            RSTART="$((REFLINE - 1))"
-            [ "$RSTART" -lt 1 ] && RSTART=1
-            REND="$((REFLINE + 2))"
-            [ "$REND" -gt "$TOTAL" ] && REND="$TOTAL"
-            sed -n "${RSTART},${REND}p" "$FILE"
-            echo ""
-        fi
-    done
-fi
+if refs:
+    print()
+    print("=== REFERENCED EQUATIONS ===")
+    for ref in refs:
+        needle = f"label{{{ref}}}"
+        ref_idx = next((i for i, line in enumerate(lines) if needle in line), None)
+        if ref_idx is None:
+            continue
+        rstart = max(0, ref_idx - 1)
+        rend = min(total - 1, ref_idx + 2)
+        emit_range(rstart, rend)
+        print()
+PYEOF

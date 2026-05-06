@@ -10,6 +10,7 @@ import requests
 import pandas as pd
 from dotenv import load_dotenv
 
+load_dotenv(os.path.expanduser('~/.zeropaper/env'))
 load_dotenv()
 
 _IDENTITY = None

@@ -67,8 +67,8 @@ If a user asks to create/set up/start a new research project, run `setup.sh` for
 This creates a standalone project folder with assembled CLAUDE.md, AGENTS.md, GEMINI.md, agents for all runtimes, and skills. After setup, tell the user to:
 
 1. `cd <project-name>`
-2. Edit `.env` with any required API keys (FRED, WRDS, etc.)
-3. Launch any runtime: `claude --dangerously-skip-permissions` / `codex --sandbox danger-full-access --ask-for-approval never` / `gemini --yolo`
+2. Put required API keys in `~/.zeropaper/env` when possible; use project `.env` only as a legacy/backwards-compatible fallback.
+3. Launch any runtime with the safe defaults: `claude` / `codex --sandbox workspace-write` / `gemini`
 4. If this is autonomous mode, say "Run the pipeline." If this is manual mode, read the runtime doc's catalog and invoke the agent or skill they want.
 
 ### WRDS server (only with `--ext empirical`)
@@ -80,7 +80,7 @@ cd <project-name>
 bash code/utils/start_services.sh   # idempotent; reuses an existing server if one is up
 ```
 
-The server is per-host, not per-project — once it's running, every project that has the WRDS skill reuses it. If you are working in the template repo itself (no `.env`, no `code/utils/`), `cd` into any existing deployed empirical project on this host and run `bash code/utils/start_services.sh` from there; the resulting server will serve the template's future deployments too.
+The server is per-host, not per-project — once it's running, every project that has the WRDS skill reuses it through host-scoped runtime files in `~/.zeropaper/`. If you are working in the template repo itself (no `.env`, no `code/utils/`), `cd` into any existing deployed empirical project on this host and run `bash code/utils/start_services.sh` from there; the resulting server will serve the template's future deployments too.
 
 To check if it's already running on this machine:
 
@@ -197,7 +197,7 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 
 ## How setup.sh works
 
-1. Clones this repo into a new project folder
+1. Copies the local checked-out template into a new project folder by default; remote setup requires explicit `--remote-url` + pinned `--remote-ref`
 2. Reads `--variant` flag (default: `finance`)
 3. Assembles runtime docs (CLAUDE.md, AGENTS.md, GEMINI.md):
    - Reads `templates/shared/core.md` (runtime-agnostic orchestrator)
@@ -221,7 +221,7 @@ Legacy: `--variant finance_llm` is shorthand for `--variant finance --ext theory
 9. Applies extensions (`--ext empirical`, `--ext theory_llm`):
    - Assembles extension agents for all three runtimes
    - Assembles extension skills from shared skill metadata + bodies
-   - Copies utilities, creates dirs, appends API keys to `.env`
+   - Copies utilities, creates dirs, and writes placeholder keys to `.env.example` (real secrets should live in `~/.zeropaper/env` or a local `.env` fallback)
 10. Removes template infrastructure, detaches from origin, commits initial state
 
 ## Adding a new variant
